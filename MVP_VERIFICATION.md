@@ -13,6 +13,7 @@
 - Background/foreground recovery: PASS
 - Lock/unlock recovery: PASS
 - Rotation recovery (portrait -> landscape -> portrait): PASS
+- Permission settings-return recovery: PASS
 - Instrumentation tests: PASS, 3 tests
 
 ## GPU Evidence
@@ -75,7 +76,17 @@ first optimization target for the next iteration.
 The screen now rechecks camera permission whenever the Activity resumes. This
 addresses returning directly from system settings after granting permission.
 The change passes unit tests, APK builds, and all three device instrumentation
-tests. A persistent overwrite-install check of this exact build was blocked by
-the phone package installer with
-`INSTALL_FAILED_ABORTED: User rejected permissions`; therefore this one focused
-device scenario remains pending until USB installation is allowed on the phone.
+tests.
+
+The focused device scenario also passed on the installed Task 9 build:
+
+1. Camera permission was revoked and marked as a fixed denial.
+2. The existing Activity displayed the permission explanation and grant action.
+3. System app settings were opened while the Activity remained in the back stack.
+4. Camera permission was granted while the app was in the background.
+5. Returning to the same Activity automatically started the camera and depth
+   inference without force-stopping or relaunching the app.
+
+The resumed screen reported GPU inference. Observed samples included
+`GPU | 9.5 FPS | 20.8 ms` and `GPU | 10.0 FPS | 21.4 ms`. Camera permission was
+confirmed as granted after the test.
