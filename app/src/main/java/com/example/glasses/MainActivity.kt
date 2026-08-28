@@ -1,44 +1,33 @@
 package com.example.glasses
 
-import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import com.example.glasses.ui.theme.GlassesTheme
-
-import android.util.Log
 import com.example.glasses.camera.DepthCameraController
+import com.example.glasses.ui.theme.GlassesTheme
 
 class MainActivity : ComponentActivity() {
     private var cameraController: DepthCameraController? = null
 
     private fun startCamera() {
-        cameraController = DepthCameraController(
-            context = this,
+        cameraController = DepthCameraController(this)
+        cameraController?.start(
             lifecycleOwner = this,
-            processFrame = { bitmap ->
+            onBitmap = { bitmap ->
                 // 当前运行在后台单线程
-                Log.d(
-                    "DepthCamera",
-                    "frame=${bitmap.width}x${bitmap.height}"
-                )
-
-                // 下一阶段在这里调用：
-                // val depthFrame = depthEstimator.estimate(bitmap)
+                try {
+                    Log.d("DepthCamera", "frame=${bitmap.width}x${bitmap.height}")
+                } finally {
+                    bitmap.recycle()
+                }
             },
             onError = { error ->
                 Log.e("DepthCamera", "Camera error", error)
-            }
+            },
         )
-
-        cameraController?.start()
     }
 
     override fun onDestroy() {
@@ -52,7 +41,7 @@ class MainActivity : ComponentActivity() {
 fun Greeting(name: String, modifier: Modifier = Modifier) {
     Text(
         text = "Hello $name!",
-        modifier = modifier
+        modifier = modifier,
     )
 }
 
