@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -88,6 +90,24 @@ fun DepthCameraScreen(
         }
     }
 
+    DisposableEffect(viewModel, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.startAudio()
+                Lifecycle.Event.ON_STOP -> viewModel.stopAudio()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            viewModel.startAudio()
+        }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.stopAudio()
+        }
+    }
+
     DisposableEffect(permissionGranted, modelReady, lifecycleOwner) {
         if (permissionGranted && modelReady) {
             controller.start(
@@ -133,14 +153,20 @@ fun DepthCameraScreen(
 
                 is DepthCameraUiState.Error -> Unit
 
-                is DepthCameraUiState.Running -> RunningDepthFrame(current)
+                is DepthCameraUiState.Running -> RunningDepthFrame(
+                    state = current,
+                    onClassificationDisplayChanged = viewModel::setClassificationDisplayEnabled,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun BoxScope.RunningDepthFrame(state: DepthCameraUiState.Running) {
+private fun BoxScope.RunningDepthFrame(
+    state: DepthCameraUiState.Running,
+    onClassificationDisplayChanged: (Boolean) -> Unit,
+) {
     Image(
         bitmap = state.image,
         contentDescription = "实时深度图",
@@ -156,11 +182,31 @@ private fun BoxScope.RunningDepthFrame(state: DepthCameraUiState.Running) {
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(
-            text = "YOLO26 Depth",
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "YOLO26 Depth",
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "分类显示",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Switch(
+                    checked = state.classificationDisplayEnabled,
+                    onCheckedChange = onClassificationDisplayChanged,
+                )
+            }
+        }
         Text(
             text = String.format(
                 Locale.US,
@@ -180,6 +226,37 @@ private fun BoxScope.RunningDepthFrame(state: DepthCameraUiState.Running) {
                 state.maxDepth,
             ),
             color = Color.White.copy(alpha = 0.82f),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = String.format(
+                Locale.US,
+                "%s | MLE %.1f ms",
+                if (state.groundFitSucceeded) "GROUND FIT" else "NO GROUND FIT",
+                state.groundFilterMs,
+            ),
+            color = if (state.groundFitSucceeded) FIT_SUCCEEDED_COLOR else FIT_FAILED_COLOR,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = String.format(
+                Locale.US,
+                "ground %.1f%% | obstacle %.1f%% | unknown %.1f%%",
+                state.groundFraction * 100.0f,
+                state.obstacleFraction * 100.0f,
+                state.unknownFraction * 100.0f,
+            ),
+            color = Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = String.format(
+                Locale.US,
+                "obstacle grid %d/4096 | max %.1f%%",
+                state.activeObstacleCells,
+                state.maxObstacleOccupancy * 100.0f,
+            ),
+            color = Color.White.copy(alpha = 0.9f),
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -217,3 +294,6 @@ private fun StatusText(
         modifier = Modifier.padding(24.dp),
     )
 }
+
+private val FIT_SUCCEEDED_COLOR = Color(0xFF66E38D)
+private val FIT_FAILED_COLOR = Color(0xFFFFC857)

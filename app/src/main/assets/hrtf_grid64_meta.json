@@ -1,0 +1,51 @@
+{
+  "format_version": 1,
+  "source_sofa": "P0020_FreeFieldComp_48kHz.sofa",
+  "source_measurement_count": 793,
+  "source_position_type": "spherical",
+  "source_position_units": "degree, degree, metre",
+  "source_azimuth_degrees": {
+    "minimum_signed": -180.0,
+    "maximum_signed": 175.0,
+    "unique_count": 72
+  },
+  "source_elevation_degrees": [
+    -45.0,
+    -30.0,
+    -20.0,
+    -10.0,
+    0.0,
+    10.0,
+    20.0,
+    30.0,
+    45.0,
+    60.0,
+    75.0,
+    90.0
+  ],
+  "rows": 64,
+  "columns": 64,
+  "receivers": 2,
+  "receiver_order_preserved": true,
+  "receiver_description": "In-the-ear microphones (Knowles FG-23329-P07) connected via a RODE VXLR adapter to the digital audio interface (RME BabyFace Pro FS). Left and right ears correspond to the first and second receivers, respectively.",
+  "hrir_length": 256,
+  "sample_rate_hz": 48000,
+  "data_delay": [
+    [
+      0.0,
+      0.0
+    ]
+  ],
+  "binary_type": "Float32 little-endian",
+  "binary_layout": "[row][column][receiver][sample]",
+  "azimuth_formula_degrees": "-60 + column * (120 / 63), column=0..63",
+  "elevation_formula_degrees": "60 - row * (105 / 63), row=0..63",
+  "interpolation": {
+    "method": "inverse squared angular-distance on unit sphere",
+    "neighbor_count": 4,
+    "hrir_alignment": "per receiver, fractional-sample main-arrival alignment to the weighted delay before amplitude interpolation",
+    "normalization": "none",
+    "receiver_swap": "none"
+  },
+  "binary_size_bytes": 8388608
+}

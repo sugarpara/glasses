@@ -8,11 +8,19 @@ sealed interface DepthCameraUiState {
 
     data class Running(
         val image: ImageBitmap,
+        val classificationDisplayEnabled: Boolean,
         val accelerator: String,
         val fps: Double,
         val inferenceMs: Double,
+        val groundFilterMs: Double,
         val minDepth: Float,
         val maxDepth: Float,
+        val groundFitSucceeded: Boolean,
+        val groundFraction: Float,
+        val obstacleFraction: Float,
+        val unknownFraction: Float,
+        val activeObstacleCells: Int,
+        val maxObstacleOccupancy: Float,
     ) : DepthCameraUiState
 
     data class Error(

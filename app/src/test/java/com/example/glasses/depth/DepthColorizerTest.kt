@@ -1,5 +1,6 @@
 package com.example.glasses.depth
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
@@ -46,5 +47,15 @@ class DepthColorizerTest {
         assertThrows(IllegalArgumentException::class.java) {
             DepthColorizer.colorize(floatArrayOf(1f, 2f), IntArray(1))
         }
+    }
+
+    @Test
+    fun doesNotModifyMetricDepthValues() {
+        val values = floatArrayOf(1f, 2f, 3f, Float.NaN)
+        val original = values.copyOf()
+
+        DepthColorizer.colorize(values, IntArray(values.size))
+
+        assertArrayEquals(original, values, 0f)
     }
 }
