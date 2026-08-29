@@ -322,6 +322,8 @@ app/build/outputs/apk/debug/app-debug.apk
 - native create/process/reset/destroy 连续执行 100 次，验证重复关闭和预分配缓冲区写入。
 - Python 金标与 C++ 地面拟合、全画面分类和 occupancy 输出的一致性。
 - 合成 occupancy 实际触发 HRTF 主声景和即时 `AudioTrack`。
+- 真实 Activity 前后台、横竖屏重建后恢复实时 GPU 深度页面。
+- 真实 AudioTrack 停止后释放轨道并清空工作线程引用。
 
 运行：
 

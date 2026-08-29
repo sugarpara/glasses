@@ -90,3 +90,38 @@ The focused device scenario also passed on the installed Task 9 build:
 The resumed screen reported GPU inference. Observed samples included
 `GPU | 9.5 FPS | 20.8 ms` and `GPU | 10.0 FPS | 21.4 ms`. Camera permission was
 confirmed as granted after the test.
+
+## Unified Depth-To-Audio Verification Update
+
+- Verification date: 2026-08-30
+- Device: HONOR REP-AN00, Android 15
+- Local commit baseline: `385ef48`
+- JVM tests: PASS, 67 tests
+- Instrumentation tests: PASS, 40 tests, 0 failed, 0 skipped
+- Debug APK, AndroidTest APK, Release APK and Release lint vital: PASS
+
+The expanded suite covers metric-depth and ground-filter contracts, Python/C++
+golden parity, successful and failed ground fits, full-frame obstacle
+classification, 64x64 occupancy, smoothing and hysteresis, immediate-alert
+deduplication, latest-only frame processing, native lifecycle, HRTF rendering,
+real AudioTrack playback, and visual-to-audio coordination.
+
+Task 15 added two device tests:
+
+1. `DepthCameraLifecycleInstrumentedTest` backgrounds and resumes the real
+   `MainActivity`, then rotates landscape and portrait. The live GPU depth page
+   recovered after every transition.
+2. `Glasses64AudioLifecycleTest` starts a real AudioTrack, calls stop, and
+   verifies that the playback callback completes, worker and track references
+   are cleared, and the captured track is released.
+
+The permission settings-return scenario was repeated with the unified build.
+A fixed CAMERA denial showed the permission page; permission was granted while
+the same Activity task was in the background, and returning to that task
+automatically restarted camera inference. A real five-second lock/wake cycle
+also returned to the same MainActivity and resumed the live page. The observed
+post-unlock sample was `GPU | 4.1 FPS | 28.0 ms` with MLE `97.4 ms`. No error
+was present in the application PID log.
+
+The complete pipeline remains below the sustained 10 FPS target. Performance
+profiling and optimization are intentionally deferred to Task 16.
