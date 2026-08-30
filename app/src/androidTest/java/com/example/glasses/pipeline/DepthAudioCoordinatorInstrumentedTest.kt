@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class DepthAudioCoordinatorInstrumentedTest {
     @Test
-    fun syntheticOccupancyStartsRealSoundscapeAndImmediateAlert() {
+    fun syntheticOccupancyStartsRealSoundscapeWithoutImmediateAlert() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val coordinator = DepthAudioCoordinator(context)
         try {
@@ -22,10 +22,7 @@ class DepthAudioCoordinatorInstrumentedTest {
             val deadline = SystemClock.elapsedRealtime() + TimeUnit.SECONDS.toMillis(10L)
             while (
                 SystemClock.elapsedRealtime() < deadline &&
-                (
-                    coordinator.state.value.soundscapeRenderCount < 1L ||
-                        coordinator.state.value.immediateAlertCount < 1L
-                    )
+                coordinator.state.value.soundscapeRenderCount < 1L
             ) {
                 assertTrue(coordinator.submit(obstacleFrame(SystemClock.elapsedRealtime())))
                 Thread.sleep(100L)
@@ -34,7 +31,7 @@ class DepthAudioCoordinatorInstrumentedTest {
             val state = coordinator.state.value
             assertEquals(DepthAudioCoordinatorStatus.ACTIVE, state.status)
             assertTrue(state.soundscapeRenderCount >= 1L)
-            assertTrue(state.immediateAlertCount >= 1L)
+            assertEquals(0L, state.immediateAlertCount)
             assertTrue(state.lastSoundscapeRenderMs > 0.0)
         } finally {
             coordinator.close()

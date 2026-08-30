@@ -32,8 +32,8 @@ class DepthAudioCoordinatorTest {
             coordinator.submit(frame(timestampMs = 1_000L, row = 10, column = 5, value = 1f))
 
             await { output.soundscapeCalls.size == 1 }
-            await { output.immediateCalls.size == 1 }
             assertEquals(1, output.warmUpCount)
+            assertTrue(output.immediateCalls.isEmpty())
             assertEquals(1.0f, output.soundscapeCalls[0].requests[5].activeCells.single().strength, 0f)
 
             clock.set(1_100L)

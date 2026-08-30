@@ -7,7 +7,6 @@ import com.example.glasses.audio.Glasses64AudioEngine
 import com.example.glasses.audio.Glasses64ColumnRequest
 import com.example.glasses.ground.GroundFilterFrame
 import com.example.glasses.obstacle.Glasses64ImmediateAlertTarget
-import com.example.glasses.obstacle.ImmediateObstacleAlertDetector
 import com.example.glasses.obstacle.ObstacleGridFrame
 import com.example.glasses.obstacle.ObstacleGridProcessor
 import com.example.glasses.obstacle.ObstacleGridProcessorStats
@@ -142,7 +141,6 @@ internal class DepthAudioCoordinator internal constructor(
     )
 
     private val processor = ObstacleGridProcessor(processorDispatcher)
-    private val alertDetector = ImmediateObstacleAlertDetector()
     private val scope = CoroutineScope(SupervisorJob() + coordinatorDispatcher)
     private val running = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
@@ -187,7 +185,6 @@ internal class DepthAudioCoordinator internal constructor(
         audioGeneration.incrementAndGet()
         mainPlaybackActive.set(false)
         latestFrame.set(null)
-        alertDetector.reset()
         processor.reset()
         mutableState.value = DepthAudioCoordinatorState(
             status = DepthAudioCoordinatorStatus.WAITING_FOR_FRAME,
@@ -211,7 +208,6 @@ internal class DepthAudioCoordinator internal constructor(
         val activeObstacleCount = frame.activeMask.count { it }
 
         if (!frame.fitSucceeded) {
-            alertDetector.reset()
             mutableState.update {
                 it.copy(
                     latestInputTimestampMs = frame.timestampMs,
@@ -236,7 +232,7 @@ internal class DepthAudioCoordinator internal constructor(
             )
         }
 
-        alertDetector.detect(frame, nowMs = clock())?.let(::playImmediateAlert)
+        // Appearance-based immediate alerts stay disabled until distance thresholds replace them.
         startLatestSoundscapeIfNeeded()
     }
 
@@ -276,34 +272,6 @@ internal class DepthAudioCoordinator internal constructor(
         startLatestSoundscapeIfNeeded()
     }
 
-    private fun playImmediateAlert(event: com.example.glasses.obstacle.ImmediateObstacleAlertEvent) {
-        val generation = audioGeneration.get()
-        try {
-            audioOutput.playImmediateObstacleAlert(
-                targets = event.targets,
-                inputTimestampMs = event.inputTimestampMs,
-                continuePlayback = {
-                    generation == audioGeneration.get() && canPlay(latestFrame.get())
-                },
-                onStarted = { _, totalLatencyMs, _ ->
-                    if (generation == audioGeneration.get()) {
-                        mutableState.update {
-                            it.copy(
-                                lastImmediateAlertLatencyMs = totalLatencyMs,
-                                immediateAlertCount = it.immediateAlertCount + 1L,
-                            )
-                        }
-                    }
-                },
-                onFinished = {},
-                onStopped = {},
-                onError = { message -> handleAudioError(generation, message) },
-            )
-        } catch (error: Throwable) {
-            handleAudioError(generation, error.message ?: error.javaClass.simpleName)
-        }
-    }
-
     private fun handleAudioError(generation: Long, message: String) {
         if (generation != audioGeneration.get()) return
         mainPlaybackActive.set(false)
@@ -338,7 +306,6 @@ internal class DepthAudioCoordinator internal constructor(
         audioGeneration.incrementAndGet()
         mainPlaybackActive.set(false)
         latestFrame.set(null)
-        alertDetector.reset()
         processor.reset()
         audioOutput.stop()
         mutableState.value = DepthAudioCoordinatorState(
