@@ -272,6 +272,9 @@ private:
     std::vector<std::uint8_t> opened_mask_;
     std::vector<std::uint8_t> ground_mask_;
     std::vector<std::uint8_t> obstacle_range_active_mask_;
+    std::vector<std::uint8_t> current_obstacle_mask_;
+    std::vector<std::uint8_t> previous_obstacle_mask_;
+    std::vector<std::uint8_t> older_obstacle_mask_;
     std::vector<std::uint8_t> class_map_;
     struct FloodPixel {
         std::uint32_t index;

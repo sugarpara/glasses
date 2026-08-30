@@ -34,13 +34,21 @@ class GroundFilterGoldenParityTest {
                     maxIterations = fixture.maxIterations,
                 ),
             ).use { filter ->
+                val frame = MetricDepthFrame(
+                    fixture.depth,
+                    fixture.width,
+                    fixture.height,
+                    timestampMs = 1L,
+                )
                 filter.process(
-                    MetricDepthFrame(
-                        fixture.depth,
-                        fixture.width,
-                        fixture.height,
-                        timestampMs = 1L,
-                    ),
+                    frame,
+                    occupancy,
+                    distance,
+                    classMap,
+                    metrics,
+                )
+                filter.process(
+                    frame,
                     occupancy,
                     distance,
                     classMap,

@@ -74,6 +74,79 @@ class GroundClassificationTest {
     }
 
     @Test
+    fun ordinaryDepthOnlyObstacleRequiresTwoFramesButEmergencyDoesNot() {
+        val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val classMap = ByteArray(WIDTH * HEIGHT)
+        val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
+        val filter = NativeGroundFilter(
+            GroundFilterConfig(
+                fitRoiTop = 0.45f,
+                classificationRoiTop = 0f,
+                sampleStep = 2,
+            ),
+        )
+        try {
+            fun process(value: Float) {
+                val depth = FloatArray(WIDTH * HEIGHT) { Float.NaN }
+                fillRect(depth, top = 100, bottom = HEIGHT, left = 70, right = 90, value = value)
+                filter.process(
+                    MetricDepthFrame(depth, WIDTH, HEIGHT, timestampMs = 1L),
+                    occupancy,
+                    distance,
+                    classMap,
+                    metrics,
+                )
+            }
+
+            process(2.0f)
+            assertEquals(0.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
+            process(2.0f)
+            assertEquals(1.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
+
+            filter.reset()
+            process(0.7f)
+            assertEquals(1.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
+        } finally {
+            filter.close()
+        }
+    }
+
+    @Test
+    fun oneFailedFitDoesNotFlashTheWholeDepthOnlyFallback() {
+        val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val classMap = ByteArray(WIDTH * HEIGHT)
+        val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
+        val filter = NativeGroundFilter(
+            GroundFilterConfig(
+                fitRoiTop = 0.45f,
+                classificationRoiTop = 0f,
+                sampleStep = 2,
+            ),
+        )
+        try {
+            val groundFrame = MetricDepthFrame(makeGroundDepth(), WIDTH, HEIGHT, timestampMs = 1L)
+            assertTrue(filter.process(groundFrame, occupancy, distance, classMap, metrics))
+            assertTrue(filter.process(groundFrame, occupancy, distance, classMap, metrics))
+
+            val fallbackFrame = MetricDepthFrame(
+                FloatArray(WIDTH * HEIGHT) { 2.0f },
+                WIDTH,
+                HEIGHT,
+                timestampMs = 2L,
+            )
+            assertFalse(filter.process(fallbackFrame, occupancy, distance, classMap, metrics))
+            assertEquals(0.0, classFraction(classMap, 0, HEIGHT, 0, WIDTH, GROUND_CLASS_OBSTACLE), 0.0)
+
+            assertFalse(filter.process(fallbackFrame, occupancy, distance, classMap, metrics))
+            assertEquals(1.0, classFraction(classMap, 0, HEIGHT, 0, WIDTH, GROUND_CLASS_OBSTACLE), 0.0)
+        } finally {
+            filter.close()
+        }
+    }
+
+    @Test
     fun modelConsistentIslandWithoutBottomConnectionIsNotGround() {
         val plane = makeGroundDepth()
         val depth = FloatArray(WIDTH * HEIGHT) { Float.NaN }
@@ -118,6 +191,8 @@ class GroundClassificationTest {
             }
 
             assertTrue(process(leftDepth = 2.9f))
+            assertEquals(0.0, classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE), 0.0)
+            assertTrue(process(leftDepth = 2.9f))
             assertTrue(classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE) > 0.65)
             assertTrue(distance.any { it in 2.8f..3.1f })
 
@@ -126,8 +201,11 @@ class GroundClassificationTest {
             assertEquals(0.0, classFraction(classMap, 6, 22, 112, 144, GROUND_CLASS_OBSTACLE), 0.0)
 
             assertTrue(process(leftDepth = 3.4f))
+            assertTrue(classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE) > 0.40)
+            assertTrue(process(leftDepth = 3.4f))
             assertEquals(0.0, classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE), 0.0)
 
+            assertTrue(process(leftDepth = 2.9f))
             assertTrue(process(leftDepth = 2.9f))
             filter.reset()
             assertTrue(process(leftDepth = 3.1f))
@@ -167,14 +245,19 @@ class GroundClassificationTest {
             assertEquals(0.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
 
             assertFalse(process(2.9f))
+            assertEquals(0.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
+            assertFalse(process(2.9f))
             assertEquals(1.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
 
             assertFalse(process(3.1f))
             assertEquals(1.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
 
             assertFalse(process(3.4f))
+            assertEquals(1.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
+            assertFalse(process(3.4f))
             assertEquals(0.0, classFraction(classMap, 100, HEIGHT, 70, 90, GROUND_CLASS_OBSTACLE), 0.0)
 
+            assertFalse(process(2.9f))
             assertFalse(process(2.9f))
             filter.reset()
             assertFalse(process(3.1f))
@@ -197,6 +280,7 @@ class GroundClassificationTest {
                 sampleStep = 2,
             ),
         ).use { filter ->
+            filter.process(frame, occupancy, distance, classMap, metrics)
             filter.process(frame, occupancy, distance, classMap, metrics)
         }
         assertTrue(metrics[NATIVE_GROUND_FILTER_PROCESSING_MS_INDEX] >= 0.0)

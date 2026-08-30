@@ -847,6 +847,9 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
     const std::size_t pixel_count = static_cast<std::size_t>(width) * height;
     if (obstacle_range_active_mask_.size() != pixel_count) {
         obstacle_range_active_mask_.assign(pixel_count, 0U);
+        current_obstacle_mask_.assign(pixel_count, 0U);
+        previous_obstacle_mask_.assign(pixel_count, 0U);
+        older_obstacle_mask_.assign(pixel_count, 0U);
     }
     if (write_class_map) {
         class_map_.resize(pixel_count);
@@ -961,6 +964,22 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
             } else {
                 obstacle_range_active_mask_[index] = 0U;
             }
+            const bool raw_obstacle = classification == GroundClass::kObstacle;
+            current_obstacle_mask_[index] = raw_obstacle ? 1U : 0U;
+            const unsigned int obstacle_votes =
+                static_cast<unsigned int>(current_obstacle_mask_[index]) +
+                static_cast<unsigned int>(previous_obstacle_mask_[index]) +
+                static_cast<unsigned int>(older_obstacle_mask_[index]);
+            const bool emergency_obstacle =
+                raw_obstacle && depth[index] <= classification_config.emergency_depth;
+            const bool stable_obstacle =
+                IsFinitePositiveDepth(depth[index]) &&
+                (emergency_obstacle || obstacle_votes >= 2U);
+            if (stable_obstacle) {
+                classification = GroundClass::kObstacle;
+            } else if (raw_obstacle) {
+                classification = GroundClass::kUnknown;
+            }
             if (write_class_map) {
                 class_map_[index] = static_cast<std::uint8_t>(classification);
             }
@@ -1000,6 +1019,8 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
             classification_config.obstacle_exit_depth
         );
     }
+    older_obstacle_mask_.swap(previous_obstacle_mask_);
+    previous_obstacle_mask_.swap(current_obstacle_mask_);
     return result;
 }
 
@@ -1189,6 +1210,9 @@ void GroundClassificationWorkspace::Reset() {
     opened_mask_.clear();
     ground_mask_.clear();
     obstacle_range_active_mask_.clear();
+    current_obstacle_mask_.clear();
+    previous_obstacle_mask_.clear();
+    older_obstacle_mask_.clear();
     class_map_.clear();
     flood_queue_.clear();
     obstacle_counts_.fill(0U);

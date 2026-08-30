@@ -9,8 +9,8 @@
 ```text
 摄像头 -> RGBA Bitmap -> 模型输入预处理 -> LiteRT GPU/CPU 推理
        -> MetricDepthFrame(FloatArray, meters)
-       -> Native MLE 地面过滤 -> 64x64 occupancy + representative distance
-       -> 时间平滑/距离强度映射 -> HRTF 双耳连续声景 -> AudioTrack
+       -> 深度范围 Mask + 可选 MLE 地面减除 + 2/3 帧稳定
+       -> 64x64 occupancy/距离 -> HRTF 双耳连续声景 -> AudioTrack
        -> 可选深度/分类 Bitmap -> Compose 屏幕
 ```
 
@@ -27,14 +27,15 @@
 - LiteRT 优先使用 GPU；GPU 初始化失败时自动回退到 CPU。
 - 支持识别 NCHW/NHWC RGB 输入布局。
 - 将单通道米制深度张量作为正式推理结果保留在内存中。
-- 使用 C++/NDK 执行 MLE 地面拟合、Depth-only 回退、全画面分类和 64x64 障碍物占用/距离映射。
+- 使用 C++/NDK 生成基础深度范围 Mask，MLE 成功时减去地面，失败时保守回退基础 Mask。
 - 障碍物在 `3.0 m` 内进入关注范围，已进入目标超过 `3.3 m` 后退出。
-- 在内存中对占用和代表距离做时间平滑，对占用网格做激活迟滞；模式切换时清理旧状态。
+- 普通障碍物使用最近三帧中的两帧多数判定；`0.8 m` 内障碍物立即进入现有连续声景。
+- 画面和声音统一使用稳定后的障碍物 Mask；占用强度和代表距离继续在内存中平滑。
 - 使用 64x64 HRTF 数据生成连续声景，越近的障碍物声音越强，并通过 `AudioTrack` 播放。
 - 基于“新障碍物出现”的即时滴声当前保持停用，等待后续按危险距离重新定义。
 - 可选择是否把深度张量映射为伪彩色图；颜色映射不会修改原始深度。
-- 可切换障碍物分类显示；Ground-aware 模式只显示范围内非地面障碍物，Depth-only
-  模式显示范围内全部有效深度，其余显示为黑色。
+- 可切换障碍物分类显示；MLE 可靠时显示范围内非地面障碍物，MLE 失败时显示稳定后的
+  基础深度范围结果，其余显示为黑色。
 - 记录每帧有限正值比例、最小值、最大值以及近似 P10/P50/P90。
 - 屏幕显示实际加速器、FPS、单次模型推理时间和当前深度范围。
 - 支持相机运行时权限，以及从系统设置授权后返回应用自动恢复。
@@ -204,16 +205,16 @@ glasses/
 | `cpp/CMakeLists.txt` | 使用 C++17 构建 `libground_filter.so`。 |
 
 地面拟合使用画面下方 55%，分类覆盖完整画面；两者的 ROI 相互独立。拟合可使用最远
-`30.0 m` 的有效深度。Ground-aware 模式下，只有进入 `3.0 m` 关注范围且不是地面的像素
-进入障碍物网格；Depth-only 模式下，范围内全部有效深度进入视觉障碍物输出。分类显示
-关闭时，native 仍计算 occupancy、代表距离和统计值，但不写完整 classMap。拟合失败不再
-被视为整条链路不可用，也不会把未知区域标记为安全地面。
+`30.0 m` 的有效深度。基础 Mask 先按 `3.0/3.3 m` 距离迟滞生成；MLE 可靠时只从中减去
+地面，MLE 失败时保留基础 Mask。普通像素使用 2/3 帧多数判定，`0.8 m` 内障碍物绕过
+等待。分类显示关闭时，native 仍使用同一稳定 Mask 计算 occupancy、代表距离和统计值，
+但不写完整 classMap。拟合失败不再被视为整条链路不可用，也不会标记为安全。
 
 ### 障碍物与音频层
 
 | 文件 | 职责 |
 |---|---|
-| `obstacle/ObstacleGridProcessor.kt` | latest-only 消费 occupancy/距离，执行平滑、占用迟滞和统计。 |
+| `obstacle/ObstacleGridProcessor.kt` | latest-only 消费统一 Mask 生成的 occupancy/距离，执行强度平滑、退出迟滞和紧急距离直通。 |
 | `obstacle/ImmediateObstacleAlertDetector.kt` | 保留的旧新障碍检测器；当前不接入运行时播放。 |
 | `pipeline/DepthAudioCoordinator.kt` | 协调视觉帧、连续声景、超时和生命周期。 |
 | `audio/Glasses64AudioEngine.kt` | 根据 64x64 HRTF 网格和代表距离生成双声道连续声景。 |
@@ -407,8 +408,9 @@ GPU 失败时会先记录回退原因，随后显示 `accelerator=CPU`。屏幕�
   native ground filter 已显式使用 `-O3`。
 - 当前 native 工具链使用已安装的 NDK `r30-beta3`；正式发布前应升级到当时的稳定版并
   重新完成 native parity、性能和生命周期测试。
-- 完整地面拟合每两帧执行一次，中间帧最多复用一帧最近可靠平面；一旦完整拟合失败，
-  立即停止复用并把有效区域保守标为 unknown。尚未实现无可靠平面时的近距离障碍物降级检测。
+- 完整地面拟合每两帧执行一次，中间帧最多复用一帧最近可靠平面；完整拟合失败时立即
+  停止复用并切换到基础深度 Mask。2/3 帧多数判定会抑制单帧模式切换，但持续失败时
+  仍会保守显示并播放范围内区域。
 - MVP 不显示原始摄像头画面，也没有 CameraX `Preview` use case。
 - HONOR REP-AN00 热态五分钟测试的最后三分钟为 `10.972 FPS`；GPU 推理平均
   `36.055 ms`，MLE 平均 `13.649 ms`、P95 `28.502 ms`。持续 10 FPS 和 MLE 平均值

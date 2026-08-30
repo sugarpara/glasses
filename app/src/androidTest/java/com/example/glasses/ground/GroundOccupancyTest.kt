@@ -96,8 +96,16 @@ class GroundOccupancyTest {
                 sampleStep = sampleStep,
             ),
         ).use { filter ->
+            val frame = MetricDepthFrame(depth, width, height, timestampMs = 1L)
             filter.process(
-                MetricDepthFrame(depth, width, height, timestampMs = 1L),
+                frame,
+                occupancy,
+                distance,
+                classMap,
+                metrics,
+            )
+            filter.process(
+                frame,
                 occupancy,
                 distance,
                 classMap,

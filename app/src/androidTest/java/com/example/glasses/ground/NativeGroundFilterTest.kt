@@ -34,6 +34,13 @@ class NativeGroundFilterTest {
             val classMap = ByteArray(frame.values.size) { 3 }
             val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT) { 1.0 }
 
+            filter.process(
+                frame = frame,
+                obstacleOccupancy = occupancy,
+                obstacleDistanceMeters = distance,
+                classMap = if (iteration % 2 == 0) classMap else null,
+                metrics = metrics,
+            )
             val fitSucceeded = filter.process(
                 frame = frame,
                 obstacleOccupancy = occupancy,

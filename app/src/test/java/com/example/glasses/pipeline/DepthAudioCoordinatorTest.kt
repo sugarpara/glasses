@@ -54,7 +54,7 @@ class DepthAudioCoordinatorTest {
     }
 
     @Test
-    fun failedGroundFitUsesStableDepthOnlySoundscape() {
+    fun failedGroundFitUsesUnifiedSoundscapeWithoutAnExtraThreeFrameGate() {
         val clock = AtomicLong(2_000L)
         val output = FakeDepthAudioOutput()
         val executor = Executors.newSingleThreadExecutor()
@@ -68,15 +68,6 @@ class DepthAudioCoordinatorTest {
         try {
             coordinator.start()
             coordinator.submit(frame(timestampMs = 2_000L, fitSucceeded = false, value = 1f))
-            await { coordinator.processorStats.value.processedFrameCount == 1L }
-            assertEquals(DepthAudioCoordinatorStatus.DEPTH_ONLY, coordinator.state.value.status)
-            assertTrue(output.soundscapeCalls.isEmpty())
-
-            coordinator.submit(frame(timestampMs = 2_010L, fitSucceeded = false, value = 1f))
-            await { coordinator.processorStats.value.processedFrameCount == 2L }
-            assertTrue(output.soundscapeCalls.isEmpty())
-
-            coordinator.submit(frame(timestampMs = 2_020L, fitSucceeded = false, value = 1f))
             await { output.soundscapeCalls.size == 1 }
 
             assertEquals(DepthAudioCoordinatorStatus.DEPTH_ONLY, coordinator.state.value.status)

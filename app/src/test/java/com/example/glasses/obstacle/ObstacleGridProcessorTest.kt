@@ -69,51 +69,59 @@ class ObstacleGridProcessorTest {
     }
 
     @Test
-    fun depthOnlyRequiresThreeStableFramesAndKeepsOneNearestCellPerSector() {
+    fun fitStatusChangeKeepsUnifiedAudioState() {
+        val transform = ObstacleGridTransform()
+        val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val index = cellIndex(20, 30)
+        occupancy[index] = 1.0f
+        val first = transform.process(
+            ObstacleGridFrame(
+                occupancy,
+                distanceGrid(occupancy),
+                timestampMs = 1L,
+                fitSucceeded = true,
+            ),
+        )
+        occupancy[index] = 0.4f
+        val changedMode = transform.process(
+            ObstacleGridFrame(
+                occupancy,
+                distanceGrid(occupancy),
+                timestampMs = 2L,
+                fitSucceeded = false,
+            ),
+        )
+
+        assertTrue(first.activeMask[index])
+        assertEquals(0.82f, changedMode.smoothedOccupancy[index], 1.0e-6f)
+        assertTrue(changedMode.activeMask[index])
+        assertFalse(changedMode.fitSucceeded)
+    }
+
+    @Test
+    fun emergencyDistanceBypassesNormalOccupancyThresholdWithoutAddingAlertType() {
         val transform = ObstacleGridTransform()
         val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
         val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
-        val expected = listOf(
-            cellIndex(12, 8) to 1.0f,
-            cellIndex(20, 29) to 1.2f,
-            cellIndex(31, 55) to 0.9f,
-        )
-        val farther = listOf(
-            cellIndex(10, 4) to 1.8f,
-            cellIndex(18, 25) to 2.0f,
-            cellIndex(28, 48) to 1.7f,
-        )
-        for ((index, meters) in expected + farther) {
-            occupancy[index] = 1.0f
-            distance[index] = meters
-        }
+        val emergencyIndex = cellIndex(12, 8)
+        val regularIndex = cellIndex(12, 9)
+        occupancy[emergencyIndex] = 0.10f
+        occupancy[regularIndex] = 0.10f
+        distance[emergencyIndex] = 0.7f
+        distance[regularIndex] = 1.0f
 
-        fun process(fitSucceeded: Boolean, values: FloatArray = occupancy): ProcessedObstacleGridFrame =
-            transform.process(
-                ObstacleGridFrame(
-                    occupancy = values,
-                    distanceMeters = if (values === occupancy) {
-                        distance
-                    } else {
-                        distanceGrid(values)
-                    },
-                    timestampMs = 1L,
-                    fitSucceeded = fitSucceeded,
-                ),
-            )
-
-        assertEquals(0, process(fitSucceeded = false).activeMask.count { it })
-        assertEquals(0, process(fitSucceeded = false).activeMask.count { it })
-        val stable = process(fitSucceeded = false)
-        assertEquals(3, stable.activeMask.count { it })
-        assertEquals(
-            expected.map { it.first }.toSet(),
-            stable.activeMask.indices.filter { stable.activeMask[it] }.toSet(),
+        val result = transform.process(
+            ObstacleGridFrame(
+                occupancy,
+                distance,
+                timestampMs = 1L,
+                fitSucceeded = false,
+            ),
         )
 
-        val groundAware = process(fitSucceeded = true, values = FloatArray(OBSTACLE_GRID_CELL_COUNT))
-        assertTrue(groundAware.smoothedOccupancy.all { it == 0.0f })
-        assertFalse(groundAware.activeMask.any { it })
+        assertTrue(result.activeMask[emergencyIndex])
+        assertFalse(result.activeMask[regularIndex])
+        assertEquals(0.7f, result.smoothedDistanceMeters[emergencyIndex], 0.0f)
     }
 
     @Test
