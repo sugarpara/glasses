@@ -11,6 +11,7 @@ class GroundFilterConfigTest {
 
         assertEquals(0.45f, config.fitRoiTop, 0f)
         assertEquals(0f, config.classificationRoiTop, 0f)
+        assertEquals(8, config.sampleStep)
     }
 
     @Test

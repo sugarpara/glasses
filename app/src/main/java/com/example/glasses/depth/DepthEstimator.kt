@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.os.SystemClock
-import android.util.Log
 import com.example.glasses.ground.GroundFilterConfig
 import com.example.glasses.ground.GroundFilterFrame
 import com.example.glasses.ground.GroundClassificationRenderer
@@ -27,6 +26,8 @@ class DepthEstimator(
 ) : Closeable {
     private val inputPixels = IntArray(model.inputWidth * model.inputHeight)
     private val inputFloats = FloatArray(model.inputWidth * model.inputHeight * 3)
+    private val previewWidth = minOf(model.outputShape.width, MAX_PREVIEW_DIMENSION)
+    private val previewHeight = minOf(model.outputShape.height, MAX_PREVIEW_DIMENSION)
     private var outputPixels: IntArray? = null
     private val percentileSamples = FloatArray(
         minOf(MAX_PERCENTILE_SAMPLES, model.outputShape.width * model.outputShape.height),
@@ -132,22 +133,13 @@ class DepthEstimator(
                     width = metricDepth.width,
                     height = metricDepth.height,
                 )
-                renderDepthBitmap -> createDepthBitmap(output)
+                renderDepthBitmap -> createDepthBitmap(
+                    values = output,
+                    range = DepthRange(statistics.min, statistics.max),
+                )
                 else -> null
             }
             val afterRender = System.nanoTime()
-
-            if (Log.isLoggable(TAG, Log.DEBUG)) {
-                Log.d(
-                    TAG,
-                    "metricDepth=${metricDepth.width}x${metricDepth.height} " +
-                        "positive=${statistics.finitePositiveFraction} " +
-                        "range=${statistics.min}..${statistics.max} " +
-                        "p10=${statistics.p10} p50=${statistics.p50} p90=${statistics.p90} " +
-                        "groundFit=${groundFilterFrame.fitSucceeded} " +
-                        "groundFilterMs=${groundFilterFrame.processingMs}",
-                )
-            }
 
             val frame = DepthFrame(
                 metricDepth = metricDepth,
@@ -172,13 +164,22 @@ class DepthEstimator(
         }
     }
 
-    private fun createDepthBitmap(values: FloatArray): Bitmap {
-        val pixels = outputPixels ?: IntArray(values.size).also { outputPixels = it }
-        DepthColorizer.colorize(values, pixels)
+    private fun createDepthBitmap(values: FloatArray, range: DepthRange): Bitmap {
+        val pixelCount = previewWidth * previewHeight
+        val pixels = outputPixels ?: IntArray(pixelCount).also { outputPixels = it }
+        DepthColorizer.colorizeResampled(
+            values = values,
+            sourceWidth = model.outputShape.width,
+            sourceHeight = model.outputShape.height,
+            output = pixels,
+            outputWidth = previewWidth,
+            outputHeight = previewHeight,
+            range = range,
+        )
         return Bitmap.createBitmap(
             pixels,
-            model.outputShape.width,
-            model.outputShape.height,
+            previewWidth,
+            previewHeight,
             Bitmap.Config.ARGB_8888,
         )
     }
@@ -205,23 +206,19 @@ class DepthEstimator(
         var max = Float.NEGATIVE_INFINITY
         var finitePositiveCount = 0
         var sampleCount = 0
+        var visitedSampleCount = 0
         val sampleStride = ((values.size + percentileSamples.size - 1) / percentileSamples.size)
             .coerceAtLeast(1)
-        var nextSampleIndex = 0
 
-        for (index in values.indices) {
+        for (index in values.indices step sampleStride) {
             val value = values[index]
             val valid = value.isFinite() && value > 0f
+            visitedSampleCount++
             if (valid) {
                 finitePositiveCount++
                 if (value < min) min = value
                 if (value > max) max = value
-            }
-            if (index == nextSampleIndex) {
-                if (valid && sampleCount < percentileSamples.size) {
-                    percentileSamples[sampleCount++] = value
-                }
-                nextSampleIndex += sampleStride
+                percentileSamples[sampleCount++] = value
             }
         }
 
@@ -244,7 +241,7 @@ class DepthEstimator(
         return MetricDepthStatistics(
             min = min,
             max = max,
-            finitePositiveFraction = finitePositiveCount.toDouble() / values.size,
+            finitePositiveFraction = finitePositiveCount.toDouble() / visitedSampleCount,
             p10 = percentile(percentileSamples, sampleCount, 0.10),
             p50 = percentile(percentileSamples, sampleCount, 0.50),
             p90 = percentile(percentileSamples, sampleCount, 0.90),
@@ -307,7 +304,7 @@ class DepthEstimator(
     )
 
     companion object {
-        private const val TAG = "DepthEstimator"
         private const val MAX_PERCENTILE_SAMPLES = 4_096
+        private const val MAX_PREVIEW_DIMENSION = 256
     }
 }

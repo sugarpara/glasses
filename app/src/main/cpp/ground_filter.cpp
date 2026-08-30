@@ -761,6 +761,22 @@ bool IsValidClassificationConfig(const GroundClassificationConfig& config) {
         config.bottom_seed_fraction > 0.0 && config.bottom_seed_fraction <= 1.0;
 }
 
+double PosteriorResidualLimit(
+    const GroundPlaneModel& model,
+    double posterior_threshold
+) {
+    constexpr double kSqrtTwoPi = 2.5066282746310005024;
+    const double denominator =
+        model.ground_prior * (1.0 - posterior_threshold);
+    if (model.sigma <= 0.0 || denominator <= 0.0) return -1.0;
+    const double density_ratio =
+        posterior_threshold * (1.0 - model.ground_prior) * model.outlier_density *
+        kSqrtTwoPi * model.sigma / denominator;
+    if (density_ratio <= 0.0) return std::numeric_limits<double>::infinity();
+    if (density_ratio > 1.0) return -1.0;
+    return model.sigma * std::sqrt(-2.0 * std::log(density_ratio));
+}
+
 }  // namespace
 
 GroundClassificationResult GroundClassificationWorkspace::Classify(
@@ -776,7 +792,6 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
     GroundClassificationResult result;
     result.fit_succeeded = fit.succeeded();
     obstacle_counts_.fill(0U);
-    total_counts_.fill(0U);
     obstacle_occupancy_.fill(0.0F);
     if (depth == nullptr || width <= 0 || height <= 0 ||
         coordinates.width() != width || coordinates.height() != height ||
@@ -788,19 +803,11 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
     PrepareGridMapping(width, height);
 
     const std::size_t pixel_count = static_cast<std::size_t>(width) * height;
-    plane_residuals_.resize(pixel_count);
-    candidate_mask_.resize(pixel_count);
-    eroded_mask_.resize(pixel_count);
-    opened_mask_.resize(pixel_count);
-    ground_mask_.resize(pixel_count);
     if (write_class_map) {
         class_map_.resize(pixel_count);
     } else {
         class_map_.clear();
     }
-    std::fill(plane_residuals_.begin(), plane_residuals_.end(), 0.0);
-    std::fill(candidate_mask_.begin(), candidate_mask_.end(), 0U);
-    std::fill(ground_mask_.begin(), ground_mask_.end(), 0U);
 
     const int classification_roi_start = std::min(
         height - 1,
@@ -814,22 +821,43 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
     const auto& normalized_y = coordinates.y();
 
     if (fit.succeeded()) {
+        plane_residuals_.resize(pixel_count);
+        candidate_mask_.resize(pixel_count);
+        eroded_mask_.resize(pixel_count);
+        opened_mask_.resize(pixel_count);
+        ground_mask_.resize(pixel_count);
+        std::fill(candidate_mask_.begin(), candidate_mask_.end(), 0U);
         const GroundPlaneModel& model = fit.model;
-        const double residual_limit = fit_config.sigma_multiplier * model.sigma;
+        column_plane_terms_.resize(static_cast<std::size_t>(width));
+        row_plane_terms_.resize(static_cast<std::size_t>(height));
+        for (int column = 0; column < width; ++column) {
+            column_plane_terms_[column] = static_cast<float>(
+                model.coefficients.a * normalized_x[column]);
+        }
+        for (int row = 0; row < height; ++row) {
+            row_plane_terms_[row] = static_cast<float>(
+                model.coefficients.b * normalized_y[static_cast<std::size_t>(row) * width] +
+                model.coefficients.c);
+        }
+        const float residual_limit = static_cast<float>(
+            fit_config.sigma_multiplier * model.sigma);
+        const double posterior_residual_limit = PosteriorResidualLimit(
+            model,
+            classification_config.posterior_threshold);
+        const float candidate_residual_limit = std::min(
+            residual_limit,
+            static_cast<float>(posterior_residual_limit));
         for (int row = classification_roi_start; row < height; ++row) {
+            const std::size_t row_offset = static_cast<std::size_t>(row) * width;
+            const float row_plane_term = row_plane_terms_[row];
             for (int column = 0; column < width; ++column) {
-                const std::size_t index = static_cast<std::size_t>(row) * width + column;
+                const std::size_t index = row_offset + column;
                 if (!IsFitDepth(depth[index], fit_config)) continue;
-                const double predicted =
-                    model.coefficients.a * normalized_x[index] +
-                    model.coefficients.b * normalized_y[index] + model.coefficients.c;
-                const double residual = 1.0 / static_cast<double>(depth[index]) - predicted;
+                const float predicted = column_plane_terms_[column] + row_plane_term;
+                const float residual = 1.0F / depth[index] - predicted;
                 plane_residuals_[index] = residual;
-                const double posterior = GroundPosterior(
-                    residual, model.sigma, model.ground_prior, model.outlier_density);
                 candidate_mask_[index] =
-                    posterior >= classification_config.posterior_threshold &&
-                    std::abs(residual) <= residual_limit
+                    std::abs(residual) <= candidate_residual_limit
                     ? 1U
                     : 0U;
             }
@@ -841,12 +869,15 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
     std::size_t ground_count = 0;
     std::size_t obstacle_count = 0;
     std::size_t unknown_count = 0;
-    const double closer_residual_limit = fit.succeeded()
-        ? fit_config.sigma_multiplier * fit.model.sigma
-        : 0.0;
+    const float closer_residual_limit = fit.succeeded()
+        ? static_cast<float>(fit_config.sigma_multiplier * fit.model.sigma)
+        : 0.0F;
     for (int row = 0; row < height; ++row) {
+        const std::size_t row_offset = static_cast<std::size_t>(row) * width;
+        const std::size_t grid_row_offset =
+            static_cast<std::size_t>(row_to_grid_[row]) * kObstacleGridSize;
         for (int column = 0; column < width; ++column) {
-            const std::size_t index = static_cast<std::size_t>(row) * width + column;
+            const std::size_t index = row_offset + column;
             GroundClass classification = GroundClass::kInvalid;
             if (IsFinitePositiveDepth(depth[index])) {
                 if (row < classification_roi_start || !fit.succeeded()) {
@@ -869,9 +900,7 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
                 class_map_[index] = static_cast<std::uint8_t>(classification);
             }
             const std::size_t grid_cell =
-                static_cast<std::size_t>(row_to_grid_[row]) * kObstacleGridSize +
-                column_to_grid_[column];
-            ++total_counts_[grid_cell];
+                grid_row_offset + column_to_grid_[column];
             obstacle_counts_[grid_cell] += classification == GroundClass::kObstacle ? 1U : 0U;
             ground_count += classification == GroundClass::kGround ? 1U : 0U;
             obstacle_count += classification == GroundClass::kObstacle ? 1U : 0U;
@@ -915,6 +944,14 @@ void GroundClassificationWorkspace::PrepareGridMapping(int width, int height) {
             std::min<std::uint64_t>(numerator / static_cast<std::uint64_t>(height),
                                     kObstacleGridSize - 1U));
     }
+    total_counts_.fill(0U);
+    for (int row = 0; row < height; ++row) {
+        const std::size_t grid_row_offset =
+            static_cast<std::size_t>(row_to_grid_[row]) * kObstacleGridSize;
+        for (int column = 0; column < width; ++column) {
+            ++total_counts_[grid_row_offset + column_to_grid_[column]];
+        }
+    }
 }
 
 void GroundClassificationWorkspace::MorphologicalOpen(
@@ -929,6 +966,34 @@ void GroundClassificationWorkspace::MorphologicalOpen(
     const int radius = kernel_size / 2;
     std::fill(eroded_mask_.begin(), eroded_mask_.end(), 0U);
     std::fill(opened_mask_.begin(), opened_mask_.end(), 0U);
+
+    if (kernel_size == 3) {
+        for (int row = 0; row < height; ++row) {
+            const std::size_t row_offset = static_cast<std::size_t>(row) * width;
+            for (int column = 0; column < width; ++column) {
+                const std::size_t index = row_offset + column;
+                const bool survives = candidate_mask_[index] != 0U &&
+                    (row == 0 || candidate_mask_[index - width] != 0U) &&
+                    (row + 1 == height || candidate_mask_[index + width] != 0U) &&
+                    (column == 0 || candidate_mask_[index - 1U] != 0U) &&
+                    (column + 1 == width || candidate_mask_[index + 1U] != 0U);
+                eroded_mask_[index] = survives ? 1U : 0U;
+            }
+        }
+        for (int row = 0; row < height; ++row) {
+            const std::size_t row_offset = static_cast<std::size_t>(row) * width;
+            for (int column = 0; column < width; ++column) {
+                const std::size_t index = row_offset + column;
+                const bool included = eroded_mask_[index] != 0U ||
+                    (row > 0 && eroded_mask_[index - width] != 0U) ||
+                    (row + 1 < height && eroded_mask_[index + width] != 0U) ||
+                    (column > 0 && eroded_mask_[index - 1U] != 0U) ||
+                    (column + 1 < width && eroded_mask_[index + 1U] != 0U);
+                opened_mask_[index] = included ? 1U : 0U;
+            }
+        }
+        return;
+    }
 
     for (int row = 0; row < height; ++row) {
         for (int column = 0; column < width; ++column) {
@@ -1001,38 +1066,45 @@ void GroundClassificationWorkspace::MarkBottomConnected(
             const std::size_t index = static_cast<std::size_t>(row) * width + column;
             if (opened_mask_[index] != 0U && ground_mask_[index] == 0U) {
                 ground_mask_[index] = 1U;
-                flood_queue_.push_back(index);
+                flood_queue_.push_back({static_cast<std::uint32_t>(index), column});
             }
         }
     }
 
+    const std::uint32_t pixel_count = static_cast<std::uint32_t>(
+        static_cast<std::size_t>(width) * height);
+    const std::uint32_t row_stride = static_cast<std::uint32_t>(width);
+    const auto enqueue = [this](std::uint32_t index, std::int32_t column) {
+        if (opened_mask_[index] == 0U || ground_mask_[index] != 0U) return;
+        ground_mask_[index] = 1U;
+        flood_queue_.push_back({index, column});
+    };
     std::size_t queue_index = 0;
     while (queue_index < flood_queue_.size()) {
-        const std::size_t index = flood_queue_[queue_index++];
-        const int row = static_cast<int>(index / static_cast<std::size_t>(width));
-        const int column = static_cast<int>(index % static_cast<std::size_t>(width));
-        for (int delta_y = -1; delta_y <= 1; ++delta_y) {
-            for (int delta_x = -1; delta_x <= 1; ++delta_x) {
-                if (delta_x == 0 && delta_y == 0) continue;
-                const int neighbor_row = row + delta_y;
-                const int neighbor_column = column + delta_x;
-                if (neighbor_row < 0 || neighbor_row >= height || neighbor_column < 0 ||
-                    neighbor_column >= width) {
-                    continue;
-                }
-                const std::size_t neighbor =
-                    static_cast<std::size_t>(neighbor_row) * width + neighbor_column;
-                if (opened_mask_[neighbor] != 0U && ground_mask_[neighbor] == 0U) {
-                    ground_mask_[neighbor] = 1U;
-                    flood_queue_.push_back(neighbor);
-                }
-            }
+        const FloodPixel current = flood_queue_[queue_index++];
+        const bool has_left = current.column > 0;
+        const bool has_right = current.column + 1 < width;
+        if (current.index >= row_stride) {
+            const std::uint32_t upper = current.index - row_stride;
+            if (has_left) enqueue(upper - 1U, current.column - 1);
+            enqueue(upper, current.column);
+            if (has_right) enqueue(upper + 1U, current.column + 1);
+        }
+        if (has_left) enqueue(current.index - 1U, current.column - 1);
+        if (has_right) enqueue(current.index + 1U, current.column + 1);
+        if (current.index + row_stride < pixel_count) {
+            const std::uint32_t lower = current.index + row_stride;
+            if (has_left) enqueue(lower - 1U, current.column - 1);
+            enqueue(lower, current.column);
+            if (has_right) enqueue(lower + 1U, current.column + 1);
         }
     }
 }
 
 void GroundClassificationWorkspace::Reset() {
     plane_residuals_.clear();
+    column_plane_terms_.clear();
+    row_plane_terms_.clear();
     candidate_mask_.clear();
     eroded_mask_.clear();
     opened_mask_.clear();
@@ -1042,6 +1114,10 @@ void GroundClassificationWorkspace::Reset() {
     obstacle_counts_.fill(0U);
     total_counts_.fill(0U);
     obstacle_occupancy_.fill(0.0F);
+    grid_mapping_width_ = 0;
+    grid_mapping_height_ = 0;
+    column_to_grid_.clear();
+    row_to_grid_.clear();
 }
 
 }  // namespace glasses::ground

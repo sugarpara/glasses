@@ -156,6 +156,7 @@ fun DepthCameraScreen(
                 is DepthCameraUiState.Running -> RunningDepthFrame(
                     state = current,
                     onClassificationDisplayChanged = viewModel::setClassificationDisplayEnabled,
+                    onFrameDisplayed = viewModel::reportUiFrameDisplayed,
                 )
             }
         }
@@ -166,7 +167,11 @@ fun DepthCameraScreen(
 private fun BoxScope.RunningDepthFrame(
     state: DepthCameraUiState.Running,
     onClassificationDisplayChanged: (Boolean) -> Unit,
+    onFrameDisplayed: (Long) -> Unit,
 ) {
+    LaunchedEffect(state.performanceFrameSequence) {
+        onFrameDisplayed(state.performancePublishedAtNanos)
+    }
     Image(
         bitmap = state.image,
         contentDescription = "实时深度图",

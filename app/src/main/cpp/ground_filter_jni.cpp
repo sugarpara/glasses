@@ -45,6 +45,11 @@ struct GroundFilterContext {
     glasses::ground::MleGroundConfig mle_config;
     glasses::ground::GroundPlaneWorkspace fit_workspace;
     glasses::ground::GroundPlaneFitResult last_fit_result;
+    glasses::ground::GroundPlaneFitResult reusable_fit_result;
+    bool has_reusable_fit = false;
+    bool reuse_fit_on_next_frame = false;
+    int reusable_fit_width = 0;
+    int reusable_fit_height = 0;
     glasses::ground::GroundClassificationConfig classification_config;
     glasses::ground::GroundClassificationWorkspace classification_workspace;
     glasses::ground::GroundClassificationResult last_classification_result;
@@ -155,12 +160,33 @@ Java_com_example_glasses_ground_NativeGroundFilter_nativeProcess(
     jboolean is_copy = JNI_FALSE;
     jfloat* depth = env->GetFloatArrayElements(depth_values, &is_copy);
     if (depth == nullptr) return JNI_FALSE;
-    context->last_fit_result = context->fit_workspace.Fit(
-        depth,
-        width,
-        height,
-        context->mle_config
-    );
+    const bool reusable_dimensions_match =
+        context->reusable_fit_width == width && context->reusable_fit_height == height;
+    const bool run_full_fit = !context->has_reusable_fit ||
+        !context->reuse_fit_on_next_frame || !reusable_dimensions_match;
+    if (run_full_fit) {
+        context->last_fit_result = context->fit_workspace.Fit(
+            depth,
+            width,
+            height,
+            context->mle_config
+        );
+        if (context->last_fit_result.succeeded()) {
+            context->reusable_fit_result = context->last_fit_result;
+            context->has_reusable_fit = true;
+            context->reuse_fit_on_next_frame = true;
+            context->reusable_fit_width = width;
+            context->reusable_fit_height = height;
+        } else {
+            context->has_reusable_fit = false;
+            context->reuse_fit_on_next_frame = false;
+            context->reusable_fit_width = 0;
+            context->reusable_fit_height = 0;
+        }
+    } else {
+        context->last_fit_result = context->reusable_fit_result;
+        context->reuse_fit_on_next_frame = false;
+    }
     const glasses::ground::NormalizedCoordinateTable* coordinates =
         context->fit_workspace.coordinates();
     if (coordinates != nullptr) {
@@ -221,6 +247,11 @@ Java_com_example_glasses_ground_NativeGroundFilter_nativeReset(
     context->fit_workspace.Reset();
     context->classification_workspace.Reset();
     context->last_fit_result = {};
+    context->reusable_fit_result = {};
+    context->has_reusable_fit = false;
+    context->reuse_fit_on_next_frame = false;
+    context->reusable_fit_width = 0;
+    context->reusable_fit_height = 0;
     context->last_classification_result = {};
 }
 

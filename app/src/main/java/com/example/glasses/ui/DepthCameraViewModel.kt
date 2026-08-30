@@ -1,6 +1,7 @@
 package com.example.glasses.ui
 
 import android.app.Application
+import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.compose.ui.graphics.asImageBitmap
@@ -11,6 +12,7 @@ import com.example.glasses.ground.ClassificationRenderThrottle
 import com.example.glasses.inference.LiteRtDepthModel
 import com.example.glasses.inference.ModelFileProvider
 import com.example.glasses.pipeline.DepthAudioCoordinator
+import com.example.glasses.pipeline.PipelinePerformanceMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -18,6 +20,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,11 +38,16 @@ class DepthCameraViewModel(
     private val processing = AtomicBoolean(false)
     private val audioRequested = AtomicBoolean(false)
     private val classificationDisplayEnabled = AtomicBoolean(false)
+    private val depthRenderThrottle = ClassificationRenderThrottle()
     private val classificationRenderThrottle = ClassificationRenderThrottle()
+    private val performanceMonitor = PipelinePerformanceMonitor(
+        enabled = application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
+    )
     private var estimator: DepthEstimator? = null
     private var audioCoordinator: DepthAudioCoordinator? = null
     private var lastFrameTimeNanos = 0L
     private var smoothedFps = 0.0
+    private var performanceFrameSequence = 0L
 
     fun initialize() {
         if (estimator != null || !initializing.compareAndSet(false, true)) return
@@ -58,6 +66,7 @@ class DepthCameraViewModel(
                 if (audioRequested.get()) createdAudioCoordinator.start()
                 estimator = createdEstimator
                 audioCoordinator = createdAudioCoordinator
+                observePerformance(createdAudioCoordinator)
                 createdEstimator = null
                 createdAudioCoordinator = null
                 mutableState.value = DepthCameraUiState.WaitingForCamera
@@ -73,9 +82,11 @@ class DepthCameraViewModel(
         }
     }
 
-    fun process(bitmap: Bitmap) {
+    fun process(bitmap: Bitmap, cameraConversionMs: Double) {
+        performanceMonitor.recordCamera(cameraConversionMs)
         val activeEstimator = estimator
         if (activeEstimator == null || !processing.compareAndSet(false, true)) {
+            performanceMonitor.recordDroppedFrame()
             bitmap.recycle()
             return
         }
@@ -84,15 +95,21 @@ class DepthCameraViewModel(
             var unpublishedBitmap: Bitmap? = null
             try {
                 val classificationEnabled = classificationDisplayEnabled.get()
+                val nowMs = SystemClock.elapsedRealtime()
+                val renderDepth = depthRenderThrottle.shouldRender(
+                    enabled = !classificationEnabled,
+                    nowMs = nowMs,
+                )
                 val renderClassification = classificationRenderThrottle.shouldRender(
                     enabled = classificationEnabled,
-                    nowMs = SystemClock.elapsedRealtime(),
+                    nowMs = nowMs,
                 )
                 val frame = activeEstimator.predict(
                     source = bitmap,
-                    renderDepthBitmap = !classificationEnabled,
+                    renderDepthBitmap = renderDepth,
                     renderClassificationBitmap = renderClassification,
                 )
+                performanceMonitor.recordProcessedFrame(frame)
                 audioCoordinator?.submit(frame.groundFilter)
                 val displayBitmap = frame.bitmap
                 unpublishedBitmap = displayBitmap
@@ -127,6 +144,7 @@ class DepthCameraViewModel(
                         maxObstacleOccupancy = occupancy
                     }
                 }
+                val publishedAtNanos = System.nanoTime()
                 mutableState.value = DepthCameraUiState.Running(
                     image = image,
                     classificationDisplayEnabled = classificationDisplayEnabled.get(),
@@ -142,6 +160,8 @@ class DepthCameraViewModel(
                     unknownFraction = groundFilter.unknownFraction,
                     activeObstacleCells = activeObstacleCells,
                     maxObstacleOccupancy = maxObstacleOccupancy,
+                    performanceFrameSequence = ++performanceFrameSequence,
+                    performancePublishedAtNanos = publishedAtNanos,
                 )
                 unpublishedBitmap = null
             } catch (error: CancellationException) {
@@ -159,6 +179,11 @@ class DepthCameraViewModel(
     fun reportCameraError(error: Throwable) {
         audioCoordinator?.stop()
         mutableState.value = DepthCameraUiState.Error(error.toDisplayMessage())
+    }
+
+    fun reportUiFrameDisplayed(publishedAtNanos: Long) {
+        val deliveryMs = (System.nanoTime() - publishedAtNanos).coerceAtLeast(0L) / 1_000_000.0
+        performanceMonitor.recordUi(deliveryMs)
     }
 
     fun startAudio() {
@@ -183,6 +208,7 @@ class DepthCameraViewModel(
     }
 
     override fun onCleared() {
+        performanceMonitor.logCurrentSnapshot()
         audioCoordinator?.close()
         audioCoordinator = null
         estimator?.close()
@@ -191,6 +217,47 @@ class DepthCameraViewModel(
     }
 
     private fun Throwable.toDisplayMessage(): String = message ?: javaClass.simpleName
+
+    private fun observePerformance(coordinator: DepthAudioCoordinator) {
+        viewModelScope.launch(Dispatchers.Default) {
+            var previousProcessed = 0L
+            var previousDropped = 0L
+            coordinator.processorStats.collect { stats ->
+                if (stats.processedFrameCount < previousProcessed) previousProcessed = 0L
+                if (stats.droppedFrameCount < previousDropped) previousDropped = 0L
+                val processedDelta = stats.processedFrameCount - previousProcessed
+                val droppedDelta = stats.droppedFrameCount - previousDropped
+                if (processedDelta > 0L || droppedDelta > 0L) {
+                    performanceMonitor.recordGrid(
+                        processingMs = stats.lastProcessingMs,
+                        processedDelta = processedDelta,
+                        droppedDelta = droppedDelta,
+                    )
+                }
+                previousProcessed = stats.processedFrameCount
+                previousDropped = stats.droppedFrameCount
+            }
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            var previousSoundscapes = 0L
+            var previousAlerts = 0L
+            coordinator.state.collect { state ->
+                if (state.soundscapeRenderCount < previousSoundscapes) previousSoundscapes = 0L
+                if (state.immediateAlertCount < previousAlerts) previousAlerts = 0L
+                val soundscapeDelta = state.soundscapeRenderCount - previousSoundscapes
+                val alertDelta = state.immediateAlertCount - previousAlerts
+                if (soundscapeDelta > 0L) {
+                    performanceMonitor.recordSoundscape(
+                        renderMs = state.lastSoundscapeRenderMs,
+                        countDelta = soundscapeDelta,
+                    )
+                }
+                if (alertDelta > 0L) performanceMonitor.recordImmediateAlerts(alertDelta)
+                previousSoundscapes = state.soundscapeRenderCount
+                previousAlerts = state.immediateAlertCount
+            }
+        }
+    }
 
     companion object {
         private const val MODEL_ASSET = "yolo26n-depth_w8a32.tflite"

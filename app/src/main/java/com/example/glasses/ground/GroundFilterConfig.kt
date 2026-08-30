@@ -5,7 +5,7 @@ data class GroundFilterConfig(
     val classificationRoiTop: Float = 0.0f,
     val obstacleMaxDepthMeters: Float = 5.0f,
     val fitMaxDepthMeters: Float = 30.0f,
-    val sampleStep: Int = 4,
+    val sampleStep: Int = 8,
     val maxIterations: Int = 20,
 ) {
     init {

@@ -258,13 +258,19 @@ private:
     void MarkBottomConnected(int width, int height, double bottom_seed_fraction);
     void PrepareGridMapping(int width, int height);
 
-    std::vector<double> plane_residuals_;
+    std::vector<float> plane_residuals_;
+    std::vector<float> column_plane_terms_;
+    std::vector<float> row_plane_terms_;
     std::vector<std::uint8_t> candidate_mask_;
     std::vector<std::uint8_t> eroded_mask_;
     std::vector<std::uint8_t> opened_mask_;
     std::vector<std::uint8_t> ground_mask_;
     std::vector<std::uint8_t> class_map_;
-    std::vector<std::size_t> flood_queue_;
+    struct FloodPixel {
+        std::uint32_t index;
+        std::int32_t column;
+    };
+    std::vector<FloodPixel> flood_queue_;
     int grid_mapping_width_ = 0;
     int grid_mapping_height_ = 0;
     std::vector<std::uint8_t> column_to_grid_;

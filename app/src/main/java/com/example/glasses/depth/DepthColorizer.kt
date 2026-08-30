@@ -57,4 +57,37 @@ object DepthColorizer {
         }
         return DepthRange(min = min, max = max)
     }
+
+    fun colorizeResampled(
+        values: FloatArray,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        output: IntArray,
+        outputWidth: Int,
+        outputHeight: Int,
+        range: DepthRange,
+    ) {
+        require(sourceWidth > 0 && sourceHeight > 0)
+        require(outputWidth > 0 && outputHeight > 0)
+        require(values.size.toLong() == sourceWidth.toLong() * sourceHeight.toLong())
+        require(output.size.toLong() == outputWidth.toLong() * outputHeight.toLong())
+        require(range.min.isFinite() && range.max.isFinite())
+
+        val span = range.max - range.min
+        for (outputRow in 0 until outputHeight) {
+            val sourceRow = outputRow * sourceHeight / outputHeight
+            for (outputColumn in 0 until outputWidth) {
+                val sourceColumn = outputColumn * sourceWidth / outputWidth
+                val value = values[sourceRow * sourceWidth + sourceColumn]
+                val paletteIndex = if (!value.isFinite() || span <= 0f) {
+                    0
+                } else {
+                    (((value - range.min) / span) * 255f)
+                        .roundToInt()
+                        .coerceIn(0, 255)
+                }
+                output[outputRow * outputWidth + outputColumn] = palette[paletteIndex]
+            }
+        }
+    }
 }

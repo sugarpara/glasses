@@ -101,11 +101,13 @@ flowchart TD
 7. `DepthEstimator` 将画面缩放到模型尺寸、归一化 RGB 到 `[0, 1]`，然后调用
    `LiteRtDepthModel`。
 8. 模型输出的 Float 深度数组不做单位换算，直接封装为米制 `MetricDepthFrame`。
-9. Native MLE 使用下方 ROI 拟合地面，但从画面顶部开始分类，并直接生成 64x64
-   obstacle occupancy；只有分类显示开启时才额外写入 classMap。
+9. Native MLE 使用下方 ROI 以 8 像素步长拟合地面，每两帧执行一次完整拟合，中间帧
+   只复用最近一次通过质量检查的平面；分类仍从画面顶部开始按完整 640x640 深度生成
+   64x64 obstacle occupancy，只有分类显示开启时才额外写入 classMap。
 10. `DepthAudioCoordinator` 消费最新 occupancy，执行平滑、迟滞和即时障碍检测，再由
     HRTF 引擎生成双声道声音并交给 `AudioTrack`。
-11. UI 按需生成深度伪彩色或固定四色分类 Bitmap，不参与声音输入。
+11. UI 按需生成 256x256 深度伪彩色预览或固定四色分类 Bitmap，Bitmap 最多约 4 FPS
+    刷新且不参与声音输入；模型、MLE、occupancy 和声音链路仍按完整深度帧运行。
 12. ViewModel 发布 `DepthCameraUiState.Running`，Compose 刷新画面和性能指标。
 
 ## 目录与文件职责
@@ -391,22 +393,27 @@ GPU 失败时会先记录回退原因，随后显示 `accelerator=CPU`。屏幕�
 - 相机画面当前直接拉伸到模型输入尺寸，没有 letterbox；非正方形画面会发生比例形变。
 - 当前只读取第一个输入和第一个输出 TensorBuffer。
 - 张量名称匹配和方形形状推断是兼容性回退，不是通用模型解析器。
-- 开启可视化时仍会周期性创建输出 Bitmap，仍有降低分配和内存压力的空间。
-- 当前 Release 构建关闭了 optimization，尚未配置正式签名、R8/ProGuard 和发布流程。
+- 开启可视化时仍会周期性创建输出 Bitmap；深度预览已限制为 256x256 和约 4 FPS，
+  但 CameraX RGBA Bitmap 仍会造成周期性内存高水位和 GC。
+- 当前 Android Release 构建仍关闭了 R8 optimization，尚未配置正式签名和发布流程；
+  native ground filter 已显式使用 `-O3`。
 - 当前 native 工具链使用已安装的 NDK `r30-beta3`；正式发布前应升级到当时的稳定版并
   重新完成 native parity、性能和生命周期测试。
-- 地面拟合失败时当前把有效区域保守标为 unknown；尚未实现复用最近可靠平面或无拟合
-  状态下的近距离障碍物降级检测。
+- 完整地面拟合每两帧执行一次，中间帧最多复用一帧最近可靠平面；一旦完整拟合失败，
+  立即停止复用并把有效区域保守标为 unknown。尚未实现无可靠平面时的近距离障碍物降级检测。
 - MVP 不显示原始摄像头画面，也没有 CameraX `Preview` use case。
-- 当前真机完整链路约 3.3-4.6 FPS，模型推理约 34-36 ms，MLE 后处理会随场景在约
-  100-260 ms 波动；持续 10 FPS 目标仍需后续性能优化。
+- HONOR REP-AN00 热态五分钟测试的最后三分钟为 `10.972 FPS`；GPU 推理平均
+  `36.055 ms`，MLE 平均 `13.649 ms`、P95 `28.502 ms`。持续 10 FPS 和 MLE 平均值
+  已达标，但 MLE P95 仍高于 25 ms 的最终验收目标，后续应优先分析热降频、HRTF CPU
+  竞争和 ARM 向量化，不应继续通过降低拟合采样精度换取速度。
 
 ## 后续开发建议
 
 建议按以下优先级推进，避免同时扩大模型、相机和 UI 三个方向的改动范围：
 
-1. 建立稳定的性能基准，分别记录预处理、推理和后处理耗时。
-2. 优化 Bitmap/数组复制和输出 Bitmap 分配，观察 PSS、GC 和 FPS 变化。
+1. 将 MLE P95 从 `28.502 ms` 降到 `<=25 ms`，优先分析 HRTF 线程竞争和 ARM 向量化，
+   不再扩大拟合步长或减少 RANSAC 迭代数。
+2. 继续降低 CameraX RGBA Bitmap 带来的周期性 PSS/GC 高水位，并评估直接处理 YUV。
 3. 明确是否需要保持画面比例；如需要，为输入增加 letterbox，并对输出做逆变换。
 4. 为伪彩色范围增加时间平滑或固定范围，减少跨帧颜色闪烁。
 5. 如果要同时显示原图和深度图，再引入 CameraX `Preview`，不要复用深度输出 Bitmap

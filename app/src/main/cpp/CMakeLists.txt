@@ -18,6 +18,7 @@ target_compile_features(ground_filter PRIVATE cxx_std_17)
 target_compile_options(
     ground_filter
     PRIVATE
+    -O3
     -Wall
     -Wextra
     -Wpedantic

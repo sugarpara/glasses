@@ -21,6 +21,8 @@ sealed interface DepthCameraUiState {
         val unknownFraction: Float,
         val activeObstacleCells: Int,
         val maxObstacleOccupancy: Float,
+        val performanceFrameSequence: Long,
+        val performancePublishedAtNanos: Long,
     ) : DepthCameraUiState
 
     data class Error(

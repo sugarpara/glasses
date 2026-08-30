@@ -58,4 +58,27 @@ class DepthColorizerTest {
 
         assertArrayEquals(original, values, 0f)
     }
+
+    @Test
+    fun resamplesPreviewWithoutChangingTheProvidedRange() {
+        val values = FloatArray(16) { index -> index.toFloat() }
+        val fullPixels = IntArray(values.size)
+        val range = DepthColorizer.colorize(values, fullPixels)
+        val previewPixels = IntArray(4)
+
+        DepthColorizer.colorizeResampled(
+            values = values,
+            sourceWidth = 4,
+            sourceHeight = 4,
+            output = previewPixels,
+            outputWidth = 2,
+            outputHeight = 2,
+            range = range,
+        )
+
+        assertArrayEquals(
+            intArrayOf(fullPixels[0], fullPixels[2], fullPixels[8], fullPixels[10]),
+            previewPixels,
+        )
+    }
 }

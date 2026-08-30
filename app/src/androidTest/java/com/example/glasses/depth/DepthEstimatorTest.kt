@@ -40,8 +40,10 @@ class DepthEstimatorTest {
             assertNotNull(frame.bitmap)
             val bitmap = requireNotNull(frame.bitmap)
 
-            assertEquals(frame.metricDepth.width, bitmap.width)
-            assertEquals(frame.metricDepth.height, bitmap.height)
+            assertEquals(256, bitmap.width)
+            assertEquals(256, bitmap.height)
+            assertEquals(640, frame.metricDepth.width)
+            assertEquals(640, frame.metricDepth.height)
             assertTrue(frame.minDepth.isFinite())
             assertTrue(frame.maxDepth.isFinite())
             assertTrue(frame.accelerator == "GPU" || frame.accelerator == "CPU")

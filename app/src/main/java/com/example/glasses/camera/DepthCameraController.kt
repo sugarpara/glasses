@@ -28,7 +28,7 @@ class DepthCameraController(
 
     fun start(
         lifecycleOwner: LifecycleOwner,
-        onBitmap: (Bitmap) -> Unit,
+        onBitmap: (Bitmap, Double) -> Unit,
         onError: (Throwable) -> Unit,
     ) {
         check(!closed) { "DepthCameraController is closed" }
@@ -46,9 +46,12 @@ class DepthCameraController(
                     analysis.setAnalyzer(analyzerExecutor) { image ->
                         var bitmap: Bitmap? = null
                         try {
+                            val conversionStartNs = System.nanoTime()
                             val uprightBitmap = ImageProxyBitmapConverter.toUprightBitmap(image)
+                            val conversionMs =
+                                (System.nanoTime() - conversionStartNs) / 1_000_000.0
                             bitmap = uprightBitmap
-                            onBitmap(uprightBitmap)
+                            onBitmap(uprightBitmap, conversionMs)
                             bitmap = null
                         } catch (error: Throwable) {
                             bitmap?.recycle()
