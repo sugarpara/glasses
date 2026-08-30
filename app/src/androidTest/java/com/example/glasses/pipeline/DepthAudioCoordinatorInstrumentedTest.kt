@@ -41,9 +41,12 @@ class DepthAudioCoordinatorInstrumentedTest {
     private fun obstacleFrame(timestampMs: Long): GroundFilterFrame {
         val occupancy = FloatArray(64 * 64)
         occupancy[40 * 64 + 32] = 1.0f
+        val distance = FloatArray(64 * 64)
+        distance[40 * 64 + 32] = 1.0f
         return GroundFilterFrame(
             classMap = null,
             obstacleOccupancy = occupancy,
+            obstacleDistanceMeters = distance,
             width = 640,
             height = 640,
             timestampMs = timestampMs,

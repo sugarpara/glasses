@@ -30,18 +30,21 @@ class NativeGroundFilterTest {
                 ),
             )
             val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT) { 1f }
+            val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT) { 1f }
             val classMap = ByteArray(frame.values.size) { 3 }
             val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT) { 1.0 }
 
             val fitSucceeded = filter.process(
                 frame = frame,
                 obstacleOccupancy = occupancy,
+                obstacleDistanceMeters = distance,
                 classMap = if (iteration % 2 == 0) classMap else null,
                 metrics = metrics,
             )
 
             assertFalse(fitSucceeded)
             assertArrayEquals(FloatArray(OBSTACLE_GRID_CELL_COUNT), occupancy, 0f)
+            assertArrayEquals(FloatArray(OBSTACLE_GRID_CELL_COUNT), distance, 0f)
             if (iteration % 2 == 0) {
                 assertArrayEquals(ByteArray(frame.values.size) { GROUND_CLASS_UNKNOWN }, classMap)
             }
@@ -54,7 +57,7 @@ class NativeGroundFilterTest {
             filter.close()
             filter.close()
             assertThrows(IllegalStateException::class.java) {
-                filter.process(frame, occupancy, null, metrics)
+                filter.process(frame, occupancy, distance, null, metrics)
             }
         }
     }
@@ -73,6 +76,7 @@ class NativeGroundFilterTest {
                 filter.process(
                     frame,
                     FloatArray(OBSTACLE_GRID_CELL_COUNT - 1),
+                    FloatArray(OBSTACLE_GRID_CELL_COUNT),
                     null,
                     DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT),
                 )
@@ -81,6 +85,16 @@ class NativeGroundFilterTest {
                 filter.process(
                     frame,
                     FloatArray(OBSTACLE_GRID_CELL_COUNT),
+                    FloatArray(OBSTACLE_GRID_CELL_COUNT - 1),
+                    null,
+                    DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT),
+                )
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                filter.process(
+                    frame,
+                    FloatArray(OBSTACLE_GRID_CELL_COUNT),
+                    FloatArray(OBSTACLE_GRID_CELL_COUNT),
                     ByteArray(2),
                     DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT),
                 )
@@ -88,6 +102,7 @@ class NativeGroundFilterTest {
             assertThrows(IllegalArgumentException::class.java) {
                 filter.process(
                     frame,
+                    FloatArray(OBSTACLE_GRID_CELL_COUNT),
                     FloatArray(OBSTACLE_GRID_CELL_COUNT),
                     null,
                     DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT - 1),

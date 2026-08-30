@@ -34,6 +34,7 @@ class DepthEstimator(
     )
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val obstacleOccupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+    private val obstacleDistanceMeters = FloatArray(OBSTACLE_GRID_CELL_COUNT)
     private val nativeMetrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
     private var classificationMap: ByteArray? = null
     private var classificationPixels: IntArray? = null
@@ -107,12 +108,14 @@ class DepthEstimator(
         val fitSucceeded = groundFilter.process(
             frame = metricDepth,
             obstacleOccupancy = obstacleOccupancy,
+            obstacleDistanceMeters = obstacleDistanceMeters,
             classMap = requestedClassMap,
             metrics = nativeMetrics,
         )
         val groundFilterFrame = GroundFilterFrame(
             classMap = null,
             obstacleOccupancy = obstacleOccupancy.copyOf(),
+            obstacleDistanceMeters = obstacleDistanceMeters.copyOf(),
             width = metricDepth.width,
             height = metricDepth.height,
             timestampMs = metricDepth.timestampMs,

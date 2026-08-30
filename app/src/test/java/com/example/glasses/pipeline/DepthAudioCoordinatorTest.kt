@@ -149,9 +149,12 @@ class DepthAudioCoordinatorTest {
     ): GroundFilterFrame {
         val occupancy = FloatArray(64 * 64)
         occupancy[row * 64 + column] = value
+        val distance = FloatArray(64 * 64)
+        if (value > 0.0f) distance[row * 64 + column] = 1.5f
         return GroundFilterFrame(
             classMap = null,
             obstacleOccupancy = occupancy,
+            obstacleDistanceMeters = distance,
             width = 640,
             height = 640,
             timestampMs = timestampMs,

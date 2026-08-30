@@ -754,11 +754,50 @@ namespace {
 bool IsValidClassificationConfig(const GroundClassificationConfig& config) {
     return std::isfinite(config.classification_roi_top) &&
         config.classification_roi_top >= 0.0 && config.classification_roi_top < 1.0 &&
-        std::isfinite(config.obstacle_max_depth) && config.obstacle_max_depth > 0.0 &&
+        std::isfinite(config.obstacle_enter_depth) && config.obstacle_enter_depth > 0.0 &&
+        std::isfinite(config.obstacle_exit_depth) &&
+        config.obstacle_exit_depth > config.obstacle_enter_depth &&
+        std::isfinite(config.emergency_depth) && config.emergency_depth > 0.0 &&
+        config.emergency_depth < config.obstacle_enter_depth &&
         std::isfinite(config.posterior_threshold) && config.posterior_threshold > 0.0 &&
         config.posterior_threshold < 1.0 && config.morphology_kernel > 0 &&
         config.morphology_kernel % 2 == 1 && std::isfinite(config.bottom_seed_fraction) &&
         config.bottom_seed_fraction > 0.0 && config.bottom_seed_fraction <= 1.0;
+}
+
+std::size_t ObstacleDepthHistogramBin(float depth, double exit_depth) {
+    const double normalized = std::clamp(
+        static_cast<double>(depth) / exit_depth,
+        0.0,
+        1.0
+    );
+    return std::min(
+        static_cast<std::size_t>(normalized * kObstacleDepthHistogramBins),
+        kObstacleDepthHistogramBins - 1U
+    );
+}
+
+float ObstacleNearPercentileMeters(
+    const std::uint32_t* histogram,
+    std::size_t count,
+    double exit_depth
+) {
+    if (count == 0U) return 0.0F;
+    constexpr double kNearPercentile = 0.20;
+    const std::size_t target = std::max<std::size_t>(
+        1U,
+        static_cast<std::size_t>(std::ceil(static_cast<double>(count) * kNearPercentile))
+    );
+    std::size_t cumulative = 0U;
+    for (std::size_t bin = 0; bin < kObstacleDepthHistogramBins; ++bin) {
+        cumulative += histogram[bin];
+        if (cumulative >= target) {
+            const double center = (static_cast<double>(bin) + 0.5) /
+                static_cast<double>(kObstacleDepthHistogramBins);
+            return static_cast<float>(center * exit_depth);
+        }
+    }
+    return static_cast<float>(exit_depth);
 }
 
 double PosteriorResidualLimit(
@@ -792,10 +831,13 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
     GroundClassificationResult result;
     result.fit_succeeded = fit.succeeded();
     obstacle_counts_.fill(0U);
+    obstacle_depth_histogram_.fill(0U);
     obstacle_occupancy_.fill(0.0F);
+    obstacle_distance_meters_.fill(0.0F);
     if (depth == nullptr || width <= 0 || height <= 0 ||
         coordinates.width() != width || coordinates.height() != height ||
-        !IsValidConfig(fit_config) || !IsValidClassificationConfig(classification_config)) {
+        !IsValidConfig(fit_config) || !IsValidClassificationConfig(classification_config) ||
+        classification_config.obstacle_exit_depth > fit_config.fit_max_depth) {
         class_map_.clear();
         return result;
     }
@@ -803,6 +845,9 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
     PrepareGridMapping(width, height);
 
     const std::size_t pixel_count = static_cast<std::size_t>(width) * height;
+    if (obstacle_range_active_mask_.size() != pixel_count) {
+        obstacle_range_active_mask_.assign(pixel_count, 0U);
+    }
     if (write_class_map) {
         class_map_.resize(pixel_count);
     } else {
@@ -882,26 +927,44 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
             if (IsFinitePositiveDepth(depth[index])) {
                 if (row < classification_roi_start || !fit.succeeded()) {
                     classification = GroundClass::kUnknown;
+                    obstacle_range_active_mask_[index] = 0U;
                 } else if (ground_mask_[index] != 0U) {
                     classification = GroundClass::kGround;
-                } else if (depth[index] <= classification_config.obstacle_max_depth) {
-                    if (row < fit_roi_start || depth[index] < fit_config.min_depth ||
+                    obstacle_range_active_mask_[index] = 0U;
+                } else {
+                    const bool is_obstacle_candidate =
+                        row < fit_roi_start || depth[index] < fit_config.min_depth ||
                         (depth[index] <= fit_config.fit_max_depth &&
-                         plane_residuals_[index] > closer_residual_limit)) {
+                         plane_residuals_[index] > closer_residual_limit);
+                    const double range_limit = obstacle_range_active_mask_[index] != 0U
+                        ? classification_config.obstacle_exit_depth
+                        : classification_config.obstacle_enter_depth;
+                    if (is_obstacle_candidate && depth[index] <= range_limit) {
                         classification = GroundClass::kObstacle;
+                        obstacle_range_active_mask_[index] = 1U;
                     } else {
                         classification = GroundClass::kUnknown;
+                        obstacle_range_active_mask_[index] = 0U;
                     }
-                } else {
-                    classification = GroundClass::kUnknown;
                 }
+            } else {
+                obstacle_range_active_mask_[index] = 0U;
             }
             if (write_class_map) {
                 class_map_[index] = static_cast<std::uint8_t>(classification);
             }
             const std::size_t grid_cell =
                 grid_row_offset + column_to_grid_[column];
-            obstacle_counts_[grid_cell] += classification == GroundClass::kObstacle ? 1U : 0U;
+            if (classification == GroundClass::kObstacle) {
+                ++obstacle_counts_[grid_cell];
+                const std::size_t bin = ObstacleDepthHistogramBin(
+                    depth[index],
+                    classification_config.obstacle_exit_depth
+                );
+                ++obstacle_depth_histogram_[
+                    grid_cell * kObstacleDepthHistogramBins + bin
+                ];
+            }
             ground_count += classification == GroundClass::kGround ? 1U : 0U;
             obstacle_count += classification == GroundClass::kObstacle ? 1U : 0U;
             unknown_count += classification == GroundClass::kUnknown ? 1U : 0U;
@@ -920,6 +983,11 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
                     static_cast<float>(total_counts_[cell]),
                 0.0F,
                 1.0F);
+        obstacle_distance_meters_[cell] = ObstacleNearPercentileMeters(
+            obstacle_depth_histogram_.data() + cell * kObstacleDepthHistogramBins,
+            obstacle_counts_[cell],
+            classification_config.obstacle_exit_depth
+        );
     }
     return result;
 }
@@ -1109,11 +1177,14 @@ void GroundClassificationWorkspace::Reset() {
     eroded_mask_.clear();
     opened_mask_.clear();
     ground_mask_.clear();
+    obstacle_range_active_mask_.clear();
     class_map_.clear();
     flood_queue_.clear();
     obstacle_counts_.fill(0U);
     total_counts_.fill(0U);
+    obstacle_depth_histogram_.fill(0U);
     obstacle_occupancy_.fill(0.0F);
+    obstacle_distance_meters_.fill(0.0F);
     grid_mapping_width_ = 0;
     grid_mapping_height_ = 0;
     column_to_grid_.clear();

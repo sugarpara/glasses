@@ -49,9 +49,12 @@ class Hrtf64AudioCoreTest {
                     endRow = 36,
                     representativeRow = 32,
                     strength = 0.8f,
+                    distanceMeters = 1.5f,
                 ),
             ),
-            activeCells = listOf(Glasses64ActiveCell(row = 32, strength = 0.8f)),
+            activeCells = listOf(
+                Glasses64ActiveCell(row = 32, strength = 0.8f, distanceMeters = 1.5f),
+            ),
         )
 
         Glasses64AudioEngine(context).use { engine ->

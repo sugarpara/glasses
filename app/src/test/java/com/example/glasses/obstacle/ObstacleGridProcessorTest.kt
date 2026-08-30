@@ -20,7 +20,12 @@ class ObstacleGridProcessorTest {
         occupancy[cellIndex(10, 13)] = 0.54f
 
         val result = ObstacleGridTransform().process(
-            ObstacleGridFrame(occupancy, timestampMs = 100L, fitSucceeded = true),
+            ObstacleGridFrame(
+                occupancy,
+                distanceGrid(occupancy),
+                timestampMs = 100L,
+                fitSucceeded = true,
+            ),
         )
 
         assertEquals(0.55f, result.smoothedOccupancy[cellIndex(10, 12)], 0.0f)
@@ -39,7 +44,12 @@ class ObstacleGridProcessorTest {
             val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
             occupancy[index] = value
             return transform.process(
-                ObstacleGridFrame(occupancy, timestampMs = 1L, fitSucceeded = true),
+                ObstacleGridFrame(
+                    occupancy,
+                    distanceGrid(occupancy),
+                    timestampMs = 1L,
+                    fitSucceeded = true,
+                ),
             )
         }
 
@@ -68,7 +78,12 @@ class ObstacleGridProcessorTest {
         setRegion(occupancy, column, 30..31, 0.8f)
 
         val result = ObstacleGridTransform().process(
-            ObstacleGridFrame(occupancy, timestampMs = 10L, fitSucceeded = true),
+            ObstacleGridFrame(
+                occupancy,
+                distanceGrid(occupancy, distanceMeters = 1.2f),
+                timestampMs = 10L,
+                fitSucceeded = true,
+            ),
         )
         val request = result.columnRequests[column]
 
@@ -76,6 +91,8 @@ class ObstacleGridProcessorTest {
         assertEquals(listOf(0.9f, 0.7f, 0.8f), request.regions.map { it.strength })
         assertEquals(8, request.activeCells.size)
         assertEquals((2..3).toList() + (10..11) + (20..21) + (30..31), request.activeCells.map { it.row })
+        assertTrue(request.activeCells.all { it.distanceMeters == 1.2f })
+        assertTrue(request.regions.all { it.distanceMeters == 1.2f })
     }
 
     @Test
@@ -107,6 +124,7 @@ class ObstacleGridProcessorTest {
                     processor.submit(
                         ObstacleGridFrame(
                             occupancy = occupancy,
+                            distanceMeters = distanceGrid(occupancy),
                             timestampMs = index.toLong(),
                             fitSucceeded = index % 2 == 0,
                         ),
@@ -150,6 +168,13 @@ class ObstacleGridProcessorTest {
         strength: Float,
     ) {
         for (row in rows) occupancy[cellIndex(row, column)] = strength
+    }
+
+    private fun distanceGrid(
+        occupancy: FloatArray,
+        distanceMeters: Float = 1.5f,
+    ): FloatArray = FloatArray(OBSTACLE_GRID_CELL_COUNT) { index ->
+        if (occupancy[index] > 0.0f) distanceMeters else 0.0f
     }
 
     private fun cellIndex(row: Int, column: Int): Int = row * OBSTACLE_GRID_COLUMNS + column

@@ -26,6 +26,7 @@ private const val HYSTERESIS_OFF_THRESHOLD = 0.35f
 
 internal data class ProcessedObstacleGridFrame(
     val smoothedOccupancy: FloatArray,
+    val smoothedDistanceMeters: FloatArray,
     val activeMask: BooleanArray,
     val columnRequests: List<Glasses64ColumnRequest>,
     val timestampMs: Long,
@@ -35,6 +36,7 @@ internal data class ProcessedObstacleGridFrame(
 ) {
     init {
         requireValidObstacleOccupancy(smoothedOccupancy)
+        requireValidObstacleDistance(smoothedDistanceMeters)
         require(activeMask.size == OBSTACLE_GRID_CELL_COUNT)
         require(columnRequests.size == OBSTACLE_GRID_COLUMNS)
         require(timestampMs >= 0L)
@@ -57,16 +59,20 @@ internal data class ObstacleGridProcessorStats(
  */
 internal class ObstacleGridTransform {
     private var previousOccupancy: FloatArray? = null
+    private var previousDistanceMeters: FloatArray? = null
     private var activeStates = BooleanArray(OBSTACLE_GRID_CELL_COUNT)
 
     @Synchronized
     fun process(frame: ObstacleGridFrame): ProcessedObstacleGridFrame {
         val smoothed = smooth(frame.occupancy)
+        val smoothedDistance = smoothDistance(frame.distanceMeters)
         val active = updateHysteresis(smoothed)
+        clearInactiveDistances(smoothedDistance, active)
         return ProcessedObstacleGridFrame(
             smoothedOccupancy = smoothed,
+            smoothedDistanceMeters = smoothedDistance,
             activeMask = active,
-            columnRequests = buildColumnRequests(smoothed, active),
+            columnRequests = buildColumnRequests(smoothed, smoothedDistance, active),
             timestampMs = frame.timestampMs,
             fitSucceeded = frame.fitSucceeded,
             processingMs = 0.0,
@@ -77,6 +83,7 @@ internal class ObstacleGridTransform {
     @Synchronized
     fun reset() {
         previousOccupancy = null
+        previousDistanceMeters = null
         activeStates = BooleanArray(OBSTACLE_GRID_CELL_COUNT)
     }
 
@@ -107,30 +114,80 @@ internal class ObstacleGridTransform {
         return activeStates.copyOf()
     }
 
+    private fun smoothDistance(current: FloatArray): FloatArray {
+        val previous = previousDistanceMeters
+            ?: FloatArray(OBSTACLE_GRID_CELL_COUNT).also { previousDistanceMeters = it }
+        val output = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        for (index in current.indices) {
+            val currentValue = current[index]
+            val previousValue = previous[index]
+            val value = when {
+                currentValue <= 0.0f -> previousValue
+                previousValue <= 0.0f -> currentValue
+                else -> CURRENT_OCCUPANCY_WEIGHT * currentValue +
+                    PREVIOUS_OCCUPANCY_WEIGHT * previousValue
+            }
+            output[index] = value
+            previous[index] = value
+        }
+        return output
+    }
+
+    private fun clearInactiveDistances(
+        smoothedDistanceMeters: FloatArray,
+        activeMask: BooleanArray,
+    ) {
+        val previous = checkNotNull(previousDistanceMeters)
+        for (index in activeMask.indices) {
+            if (!activeMask[index]) {
+                smoothedDistanceMeters[index] = 0.0f
+                previous[index] = 0.0f
+            }
+        }
+    }
+
     private fun buildColumnRequests(
         smoothedOccupancy: FloatArray,
+        smoothedDistanceMeters: FloatArray,
         activeMask: BooleanArray,
     ): List<Glasses64ColumnRequest> = List(OBSTACLE_GRID_COLUMNS) { column ->
-        val selectedRegions = mergeColumnRegions(column, smoothedOccupancy, activeMask)
+        val selectedRegions = mergeColumnRegions(
+            column,
+            smoothedOccupancy,
+            smoothedDistanceMeters,
+            activeMask,
+        )
             .sortedByDescending { it.strength }
             .take(GLASSES64_MAX_REGIONS_PER_COLUMN)
             .sortedBy { it.representativeRow }
         Glasses64ColumnRequest(
             column = column,
             regions = selectedRegions,
-            activeCells = collectColumnActiveCells(column, smoothedOccupancy, activeMask),
+            activeCells = collectColumnActiveCells(
+                column,
+                smoothedOccupancy,
+                smoothedDistanceMeters,
+                activeMask,
+            ),
         )
     }
 
     private fun collectColumnActiveCells(
         column: Int,
         smoothedOccupancy: FloatArray,
+        smoothedDistanceMeters: FloatArray,
         activeMask: BooleanArray,
     ): List<Glasses64ActiveCell> = buildList {
         for (row in 0 until OBSTACLE_GRID_ROWS) {
             val index = cellIndex(row, column)
             if (activeMask[index]) {
-                add(Glasses64ActiveCell(row, smoothedOccupancy[index].coerceIn(0f, 1f)))
+                add(
+                    Glasses64ActiveCell(
+                        row = row,
+                        strength = smoothedOccupancy[index].coerceIn(0f, 1f),
+                        distanceMeters = smoothedDistanceMeters[index],
+                    ),
+                )
             }
         }
     }
@@ -138,12 +195,14 @@ internal class ObstacleGridTransform {
     private fun mergeColumnRegions(
         column: Int,
         smoothedOccupancy: FloatArray,
+        smoothedDistanceMeters: FloatArray,
         activeMask: BooleanArray,
     ): List<Glasses64VerticalRegion> {
         val output = mutableListOf<Glasses64VerticalRegion>()
         var startRow = -1
         var strengthSum = 0.0
         var weightedRowSum = 0.0
+        var weightedDistanceSum = 0.0
         var cellCount = 0
 
         fun finishRegion(endRow: Int) {
@@ -158,10 +217,16 @@ internal class ObstacleGridTransform {
                 endRow = endRow,
                 representativeRow = representativeRow,
                 strength = (strengthSum / cellCount.toDouble()).toFloat(),
+                distanceMeters = if (strengthSum > 0.0) {
+                    (weightedDistanceSum / strengthSum).toFloat()
+                } else {
+                    0.0f
+                },
             )
             startRow = -1
             strengthSum = 0.0
             weightedRowSum = 0.0
+            weightedDistanceSum = 0.0
             cellCount = 0
         }
 
@@ -172,6 +237,7 @@ internal class ObstacleGridTransform {
                 val strength = smoothedOccupancy[index].toDouble()
                 strengthSum += strength
                 weightedRowSum += row.toDouble() * strength
+                weightedDistanceSum += smoothedDistanceMeters[index].toDouble() * strength
                 cellCount++
             } else if (startRow >= 0) {
                 finishRegion(row - 1)

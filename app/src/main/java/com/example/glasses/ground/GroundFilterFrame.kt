@@ -1,6 +1,8 @@
 package com.example.glasses.ground
 
 import com.example.glasses.obstacle.requireValidObstacleOccupancy
+import com.example.glasses.obstacle.requireValidObstacleDistance
+import com.example.glasses.obstacle.requireMatchingObstacleDistance
 
 const val GROUND_CLASS_INVALID: Byte = 0
 const val GROUND_CLASS_GROUND: Byte = 1
@@ -16,6 +18,7 @@ const val GROUND_CLASS_UNKNOWN: Byte = 3
 data class GroundFilterFrame(
     val classMap: ByteArray?,
     val obstacleOccupancy: FloatArray,
+    val obstacleDistanceMeters: FloatArray,
     val width: Int,
     val height: Int,
     val timestampMs: Long,
@@ -29,6 +32,8 @@ data class GroundFilterFrame(
         require(width > 0 && height > 0) { "Ground filter width and height must be positive" }
         require(timestampMs >= 0L) { "Ground filter timestamp must be non-negative" }
         requireValidObstacleOccupancy(obstacleOccupancy)
+        requireValidObstacleDistance(obstacleDistanceMeters)
+        requireMatchingObstacleDistance(obstacleOccupancy, obstacleDistanceMeters)
         requireValidFraction("groundFraction", groundFraction)
         requireValidFraction("obstacleFraction", obstacleFraction)
         requireValidFraction("unknownFraction", unknownFraction)

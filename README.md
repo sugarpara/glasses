@@ -9,8 +9,8 @@
 ```text
 摄像头 -> RGBA Bitmap -> 模型输入预处理 -> LiteRT GPU/CPU 推理
        -> MetricDepthFrame(FloatArray, meters)
-       -> Native MLE 地面过滤 -> 64x64 obstacle occupancy
-       -> 时间平滑/即时障碍检测 -> HRTF 双耳声音 -> AudioTrack
+       -> Native MLE 地面过滤 -> 64x64 occupancy + representative distance
+       -> 时间平滑/距离强度映射 -> HRTF 双耳连续声景 -> AudioTrack
        -> 可选深度/分类 Bitmap -> Compose 屏幕
 ```
 
@@ -27,11 +27,13 @@
 - LiteRT 优先使用 GPU；GPU 初始化失败时自动回退到 CPU。
 - 支持识别 NCHW/NHWC RGB 输入布局。
 - 将单通道米制深度张量作为正式推理结果保留在内存中。
-- 使用 C++/NDK 执行 MLE 地面拟合、全画面分类和 64x64 障碍物占用映射。
-- 在内存中对占用网格做时间平滑、迟滞和新障碍物检测。
-- 使用 64x64 HRTF 数据生成主声景和即时提示，并通过 `AudioTrack` 在手机端播放。
+- 使用 C++/NDK 执行 MLE 地面拟合、全画面分类和 64x64 障碍物占用/距离映射。
+- 障碍物在 `3.0 m` 内进入关注范围，已进入目标超过 `3.3 m` 后退出。
+- 在内存中对占用和代表距离做时间平滑，对占用网格做激活迟滞。
+- 使用 64x64 HRTF 数据生成连续声景，越近的障碍物声音越强，并通过 `AudioTrack` 播放。
+- 基于“新障碍物出现”的即时滴声当前保持停用，等待后续按危险距离重新定义。
 - 可选择是否把深度张量映射为伪彩色图；颜色映射不会修改原始深度。
-- 可切换固定四色分类显示；关闭时不请求 native 写入 classMap。
+- 可切换障碍物分类显示；只有关注范围内的非地面障碍物显示为红色，其余显示为黑色。
 - 记录每帧有限正值比例、最小值、最大值以及近似 P10/P50/P90。
 - 屏幕显示实际加速器、FPS、单次模型推理时间和当前深度范围。
 - 支持相机运行时权限，以及从系统设置授权后返回应用自动恢复。
@@ -102,10 +104,11 @@ flowchart TD
    `LiteRtDepthModel`。
 8. 模型输出的 Float 深度数组不做单位换算，直接封装为米制 `MetricDepthFrame`。
 9. Native MLE 使用下方 ROI 以 8 像素步长拟合地面，每两帧执行一次完整拟合，中间帧
-   只复用最近一次通过质量检查的平面；分类仍从画面顶部开始按完整 640x640 深度生成
-   64x64 obstacle occupancy，只有分类显示开启时才额外写入 classMap。
-10. `DepthAudioCoordinator` 消费最新 occupancy，执行平滑、迟滞和即时障碍检测，再由
-    HRTF 引擎生成双声道声音并交给 `AudioTrack`。
+   只复用最近一次通过质量检查的平面；分类从画面顶部开始处理完整 640x640 深度，只有
+   `3.0 m` 内、不是地面的像素进入障碍物输出。Native 同时生成 64x64 occupancy 和近端
+   百分位代表距离，距离退出阈值为 `3.3 m`；只有分类显示开启时才额外写入 classMap。
+10. `DepthAudioCoordinator` 消费最新 occupancy 和距离网格，执行平滑与占用迟滞，再由
+    HRTF 引擎生成距离相关的双声道连续声景并交给 `AudioTrack`。
 11. UI 按需生成 256x256 深度伪彩色预览或固定四色分类 Bitmap，Bitmap 最多约 4 FPS
     刷新且不参与声音输入；模型、MLE、occupancy 和声音链路仍按完整深度帧运行。
 12. ViewModel 发布 `DepthCameraUiState.Running`，Compose 刷新画面和性能指标。
@@ -193,22 +196,23 @@ glasses/
 | `ground/NativeGroundFilter.kt` | 管理 native handle，校验调用方缓冲区并提供可重复安全关闭的 JNI wrapper。 |
 | `ground/GroundFilterConfig.kt` | 定义拟合 ROI、全画面分类 ROI、距离和迭代配置。 |
 | `ground/GroundClassificationRenderer.kt` | 按需把 classMap 映射为固定四色 ARGB Bitmap。 |
-| `cpp/ground_filter.cpp` | 实现 MLE/RANSAC 地面拟合、全画面分类、连通地面保留和 occupancy 映射。 |
-| `cpp/ground_filter_jni.cpp` | 实现 native 生命周期，并填充预分配 occupancy、可选 classMap 和指标缓冲区。 |
+| `cpp/ground_filter.cpp` | 实现 MLE/RANSAC 地面拟合、距离迟滞、连通地面保留及 occupancy/距离映射。 |
+| `cpp/ground_filter_jni.cpp` | 实现 native 生命周期，并填充预分配 occupancy、距离、可选 classMap 和指标缓冲区。 |
 | `cpp/CMakeLists.txt` | 使用 C++17 构建 `libground_filter.so`。 |
 
-地面拟合使用画面下方 55%，分类覆盖完整画面；两者的 ROI 相互独立。分类显示关闭时，
-native 仍计算 occupancy 和统计值，但不写完整 classMap。拟合失败时当前保守输出 unknown，
-不会生成虚假的“安全”声音。
+地面拟合使用画面下方 55%，分类覆盖完整画面；两者的 ROI 相互独立。拟合可使用最远
+`30.0 m` 的有效深度，但只有进入 `3.0 m` 关注范围且不是地面的像素进入声音网格。
+分类显示关闭时，native 仍计算 occupancy、代表距离和统计值，但不写完整 classMap。
+拟合失败时当前保守输出 unknown，并停止声音，不会生成虚假的“安全”声音。
 
 ### 障碍物与音频层
 
 | 文件 | 职责 |
 |---|---|
-| `obstacle/ObstacleGridProcessor.kt` | latest-only 消费 occupancy，执行平滑、迟滞和统计。 |
-| `obstacle/ImmediateObstacleAlertDetector.kt` | 检测新出现的障碍区域，并使用独立冷却时间。 |
-| `pipeline/DepthAudioCoordinator.kt` | 协调视觉帧、主声景、即时提示、超时和生命周期。 |
-| `audio/Glasses64AudioEngine.kt` | 根据 64x64 HRTF 网格生成双声道主声景和即时提示。 |
+| `obstacle/ObstacleGridProcessor.kt` | latest-only 消费 occupancy/距离，执行平滑、占用迟滞和统计。 |
+| `obstacle/ImmediateObstacleAlertDetector.kt` | 保留的旧新障碍检测器；当前不接入运行时播放。 |
+| `pipeline/DepthAudioCoordinator.kt` | 协调视觉帧、连续声景、超时和生命周期。 |
+| `audio/Glasses64AudioEngine.kt` | 根据 64x64 HRTF 网格和代表距离生成双声道连续声景。 |
 | `audio/Hrtf64Repository.kt` | 校验并加载只读 HRTF BIN/JSON 资产。 |
 
 ### LiteRT 推理层
@@ -304,7 +308,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 - 深度张量形状解析和非法形状拒绝。
 - 米制数据契约、伪彩色输出、非有限值、平坦深度图、数组大小及原始数组不被修改。
-- 地面过滤配置、分类颜色、占用网格、平滑迟滞和即时障碍检测。
+- 地面过滤配置、障碍物分类显示、占用/距离网格及平滑迟滞。
 - HRTF 映射、音频生成和视觉到声音协调器的 latest-only/生命周期行为。
 
 运行：
@@ -323,7 +327,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - 关闭 Bitmap 渲染后仍输出 `640x640` 米制深度，且至少 `99.9%` 为有限正值。
 - native create/process/reset/destroy 连续执行 100 次，验证重复关闭和预分配缓冲区写入。
 - Python 金标与 C++ 地面拟合、全画面分类和 occupancy 输出的一致性。
-- 合成 occupancy 实际触发 HRTF 主声景和即时 `AudioTrack`。
+- 深度进入/退出迟滞、距离网格输出和合成 occupancy 实际触发 HRTF 连续声景。
 - 真实 Activity 前后台、横竖屏重建后恢复实时 GPU 深度页面。
 - 真实 AudioTrack 停止后释放轨道并清空工作线程引用。
 

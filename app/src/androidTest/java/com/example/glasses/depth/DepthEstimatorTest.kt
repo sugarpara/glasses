@@ -158,6 +158,10 @@ class DepthEstimatorTest {
         val second = estimator.predict(source, renderDepthBitmap = false)
 
         assertNotSame(first.groundFilter.obstacleOccupancy, second.groundFilter.obstacleOccupancy)
+        assertNotSame(
+            first.groundFilter.obstacleDistanceMeters,
+            second.groundFilter.obstacleDistanceMeters,
+        )
         estimator.close()
         estimator.close()
         assertThrows(IllegalStateException::class.java) {
@@ -173,7 +177,9 @@ class DepthEstimatorTest {
         assertEquals(frame.metricDepth.height, groundFilter.height)
         assertEquals(frame.metricDepth.timestampMs, groundFilter.timestampMs)
         assertEquals(64 * 64, groundFilter.obstacleOccupancy.size)
+        assertEquals(64 * 64, groundFilter.obstacleDistanceMeters.size)
         assertTrue(groundFilter.obstacleOccupancy.all { it.isFinite() && it in 0.0f..1.0f })
+        assertTrue(groundFilter.obstacleDistanceMeters.all { it.isFinite() && it >= 0.0f })
         assertTrue(groundFilter.groundFraction.isFinite())
         assertTrue(groundFilter.groundFraction in 0.0f..1.0f)
         assertTrue(groundFilter.obstacleFraction.isFinite())

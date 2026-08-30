@@ -17,14 +17,18 @@ struct GroundFilterContext {
     GroundFilterContext(
         float fit_roi_top_value,
         float classification_roi_top_value,
-        float obstacle_max_depth_meters_value,
+        float obstacle_enter_depth_meters_value,
+        float obstacle_exit_depth_meters_value,
+        float emergency_depth_meters_value,
         float fit_max_depth_meters_value,
         int sample_step_value,
         int max_iterations_value
     )
         : fit_roi_top(fit_roi_top_value),
           classification_roi_top(classification_roi_top_value),
-          obstacle_max_depth_meters(obstacle_max_depth_meters_value),
+          obstacle_enter_depth_meters(obstacle_enter_depth_meters_value),
+          obstacle_exit_depth_meters(obstacle_exit_depth_meters_value),
+          emergency_depth_meters(emergency_depth_meters_value),
           fit_max_depth_meters(fit_max_depth_meters_value),
           sample_step(sample_step_value),
           max_iterations(max_iterations_value) {
@@ -33,12 +37,16 @@ struct GroundFilterContext {
         mle_config.sample_step = sample_step;
         mle_config.max_iterations = max_iterations;
         classification_config.classification_roi_top = classification_roi_top;
-        classification_config.obstacle_max_depth = obstacle_max_depth_meters;
+        classification_config.obstacle_enter_depth = obstacle_enter_depth_meters;
+        classification_config.obstacle_exit_depth = obstacle_exit_depth_meters;
+        classification_config.emergency_depth = emergency_depth_meters;
     }
 
     float fit_roi_top;
     float classification_roi_top;
-    float obstacle_max_depth_meters;
+    float obstacle_enter_depth_meters;
+    float obstacle_exit_depth_meters;
+    float emergency_depth_meters;
     float fit_max_depth_meters;
     int sample_step;
     int max_iterations;
@@ -54,6 +62,7 @@ struct GroundFilterContext {
     glasses::ground::GroundClassificationWorkspace classification_workspace;
     glasses::ground::GroundClassificationResult last_classification_result;
     std::array<jfloat, kObstacleGridCellCount> zero_occupancy{};
+    std::array<jfloat, kObstacleGridCellCount> zero_distance{};
 };
 
 void ThrowJavaException(JNIEnv* env, const char* class_name, const char* message) {
@@ -92,7 +101,9 @@ Java_com_example_glasses_ground_NativeGroundFilter_nativeCreate(
     jobject,
     jfloat fit_roi_top,
     jfloat classification_roi_top,
-    jfloat obstacle_max_depth_meters,
+    jfloat obstacle_enter_depth_meters,
+    jfloat obstacle_exit_depth_meters,
+    jfloat emergency_depth_meters,
     jfloat fit_max_depth_meters,
     jint sample_step,
     jint max_iterations
@@ -100,7 +111,9 @@ Java_com_example_glasses_ground_NativeGroundFilter_nativeCreate(
     auto* context = new (std::nothrow) GroundFilterContext(
         fit_roi_top,
         classification_roi_top,
-        obstacle_max_depth_meters,
+        obstacle_enter_depth_meters,
+        obstacle_exit_depth_meters,
+        emergency_depth_meters,
         fit_max_depth_meters,
         sample_step,
         max_iterations
@@ -121,6 +134,7 @@ Java_com_example_glasses_ground_NativeGroundFilter_nativeProcess(
     jint width,
     jint height,
     jfloatArray obstacle_occupancy,
+    jfloatArray obstacle_distance_meters,
     jbyteArray class_map,
     jdoubleArray metrics
 ) {
@@ -148,6 +162,12 @@ Java_com_example_glasses_ground_NativeGroundFilter_nativeProcess(
             obstacle_occupancy,
             kObstacleGridCellCount,
             "Obstacle occupancy must contain exactly 4096 values"
+        ) ||
+        !RequireArrayLength(
+            env,
+            obstacle_distance_meters,
+            kObstacleGridCellCount,
+            "Obstacle distance must contain exactly 4096 values"
         ) ||
         !RequireArrayLength(env, metrics, kMetricCount, "Native metrics must contain exactly 4 values")) {
         return JNI_FALSE;
@@ -222,6 +242,15 @@ Java_com_example_glasses_ground_NativeGroundFilter_nativeProcess(
         0,
         kObstacleGridCellCount,
         native_occupancy.data()
+    );
+    const auto& native_distance = coordinates != nullptr
+        ? context->classification_workspace.obstacle_distance_meters()
+        : context->zero_distance;
+    env->SetFloatArrayRegion(
+        obstacle_distance_meters,
+        0,
+        kObstacleGridCellCount,
+        native_distance.data()
     );
     const double processing_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - start_time).count();

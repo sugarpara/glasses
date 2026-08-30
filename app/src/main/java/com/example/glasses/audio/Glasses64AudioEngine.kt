@@ -10,6 +10,8 @@ import android.os.SystemClock
 import android.util.Log
 import com.example.glasses.obstacle.Glasses64ImmediateAlertTarget
 import com.example.glasses.obstacle.IMMEDIATE_OBSTACLE_ALERT_MAX_TARGETS
+import com.example.glasses.obstacle.OBSTACLE_EMERGENCY_DISTANCE_METERS
+import com.example.glasses.obstacle.OBSTACLE_ENTER_DISTANCE_METERS
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.PI
 import kotlin.math.abs
@@ -513,7 +515,8 @@ internal class Glasses64AudioEngine(
                     startRow = target.row,
                     endRow = target.row,
                     representativeRow = target.row,
-                    strength = target.strength
+                    strength = target.strength,
+                    distanceMeters = OBSTACLE_EMERGENCY_DISTANCE_METERS,
                 ),
                 column = target.column,
                 settings = settings,
@@ -592,6 +595,7 @@ internal class Glasses64AudioEngine(
                             row = region.representativeRow,
                             column = column,
                             strength = region.strength,
+                            distanceMeters = region.distanceMeters,
                             settings = settings,
                             frameCount = framesPerUnit
                         )
@@ -712,6 +716,7 @@ internal class Glasses64AudioEngine(
         row: Int,
         column: Int,
         strength: Float,
+        distanceMeters: Float,
         settings: Hrtf64CalibrationSettings,
         frameCount: Int
     ): Pair<FloatArray, FloatArray> {
@@ -731,7 +736,8 @@ internal class Glasses64AudioEngine(
         val left = convolveToLength(source, leftHrir, frameCount)
         val right = convolveToLength(source, rightHrir, frameCount)
         val strengthGain = 0.65f + 0.35f * strength.coerceIn(0f, 1f)
-        normalizeStereoPairInPlace(left, right, HRTF64_CELL_PEAK * strengthGain)
+        val distanceGain = glasses64DistanceGain(distanceMeters)
+        normalizeStereoPairInPlace(left, right, HRTF64_CELL_PEAK * strengthGain * distanceGain)
         return left to right
     }
 
@@ -756,6 +762,7 @@ internal class Glasses64AudioEngine(
         val right = convolveToLength(source, rightHrir, frameCount)
         val averageStrength = activeCells.map { it.strength }.average().toFloat()
         val strengthGain = 0.65f + 0.35f * averageStrength.coerceIn(0f, 1f)
+        val distanceGain = averageDistanceGain(activeCells)
         val verticalGain = glasses64ModeOutputGain(
             Glasses64VerticalSoundMode.LOG_EACH_CELL,
             visualRow
@@ -763,7 +770,7 @@ internal class Glasses64AudioEngine(
         normalizeStereoPairInPlace(
             left,
             right,
-            HRTF64_CELL_PEAK * strengthGain * verticalGain
+            HRTF64_CELL_PEAK * strengthGain * distanceGain * verticalGain
         )
         return left to right
     }
@@ -823,6 +830,7 @@ internal class Glasses64AudioEngine(
         val right = convolveToLength(source, rightHrir, frameCount)
         val averageStrength = activeCells.map { it.strength }.average().toFloat()
         val strengthGain = 0.65f + 0.35f * averageStrength.coerceIn(0f, 1f)
+        val distanceGain = averageDistanceGain(activeCells)
         val verticalGain = glasses64ModeOutputGain(
             Glasses64VerticalSoundMode.REGION_ENHANCED,
             visualRow
@@ -830,7 +838,7 @@ internal class Glasses64AudioEngine(
         normalizeStereoPairInPlace(
             left,
             right,
-            HRTF64_CELL_PEAK * strengthGain * verticalGain
+            HRTF64_CELL_PEAK * strengthGain * distanceGain * verticalGain
         )
         return left to right
     }
@@ -880,6 +888,7 @@ internal class Glasses64AudioEngine(
         val left = convolveToLength(source, leftHrir, frameCount)
         val right = convolveToLength(source, rightHrir, frameCount)
         val strengthGain = 0.65f + 0.35f * region.strength.coerceIn(0f, 1f)
+        val distanceGain = glasses64DistanceGain(region.distanceMeters)
         val heightRatio = (region.endRow - region.startRow + 1).toFloat() / GLASSES64_ROWS
         val sizeGain = 0.90f + 0.10f * sqrt(heightRatio.coerceIn(0f, 1f))
         val verticalGain = glasses64ModeOutputGain(
@@ -889,7 +898,7 @@ internal class Glasses64AudioEngine(
         normalizeStereoPairInPlace(
             left,
             right,
-            HRTF64_CELL_PEAK * strengthGain * sizeGain * verticalGain
+            HRTF64_CELL_PEAK * strengthGain * distanceGain * sizeGain * verticalGain
         )
         return left to right
     }
@@ -904,6 +913,18 @@ internal class Glasses64AudioEngine(
         }
         if (strengthSum <= 0.0) return GLASSES64_ROWS / 2
         return (weightedRowSum / strengthSum).roundToInt().coerceIn(0, GLASSES64_ROWS - 1)
+    }
+
+    private fun averageDistanceGain(activeCells: List<Glasses64ActiveCell>): Float {
+        var strengthSum = 0.0
+        var weightedGainSum = 0.0
+        for (cell in activeCells) {
+            val strength = cell.strength.coerceIn(0f, 1f).toDouble()
+            strengthSum += strength
+            weightedGainSum += glasses64DistanceGain(cell.distanceMeters).toDouble() * strength
+        }
+        if (strengthSum <= 0.0) return glasses64DistanceGain(OBSTACLE_ENTER_DISTANCE_METERS)
+        return (weightedGainSum / strengthSum).toFloat()
     }
 
     private fun generateActiveCellSource(

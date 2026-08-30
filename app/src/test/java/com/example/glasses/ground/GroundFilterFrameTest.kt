@@ -13,6 +13,7 @@ class GroundFilterFrameTest {
 
         assertNull(frame.classMap)
         assertEquals(OBSTACLE_GRID_CELL_COUNT, frame.obstacleOccupancy.size)
+        assertEquals(OBSTACLE_GRID_CELL_COUNT, frame.obstacleDistanceMeters.size)
     }
 
     @Test
@@ -26,6 +27,23 @@ class GroundFilterFrameTest {
     fun rejectsWrongOccupancyLength() {
         assertThrows(IllegalArgumentException::class.java) {
             validFrame(obstacleOccupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT - 1))
+        }
+    }
+
+    @Test
+    fun rejectsWrongOrInvalidDistanceGrid() {
+        assertThrows(IllegalArgumentException::class.java) {
+            validFrame(obstacleDistanceMeters = FloatArray(OBSTACLE_GRID_CELL_COUNT - 1))
+        }
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        distance[0] = -0.1f
+        assertThrows(IllegalArgumentException::class.java) {
+            validFrame(obstacleDistanceMeters = distance)
+        }
+        val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        occupancy[0] = 0.5f
+        assertThrows(IllegalArgumentException::class.java) {
+            validFrame(obstacleOccupancy = occupancy)
         }
     }
 
@@ -78,6 +96,7 @@ class GroundFilterFrameTest {
     private fun validFrame(
         classMap: ByteArray? = null,
         obstacleOccupancy: FloatArray = FloatArray(OBSTACLE_GRID_CELL_COUNT),
+        obstacleDistanceMeters: FloatArray = FloatArray(OBSTACLE_GRID_CELL_COUNT),
         width: Int = 2,
         height: Int = 2,
         timestampMs: Long = 0L,
@@ -88,6 +107,7 @@ class GroundFilterFrameTest {
     ) = GroundFilterFrame(
         classMap = classMap,
         obstacleOccupancy = obstacleOccupancy,
+        obstacleDistanceMeters = obstacleDistanceMeters,
         width = width,
         height = height,
         timestampMs = timestampMs,

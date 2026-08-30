@@ -18,18 +18,20 @@ class GroundPlaneFitTest {
         val depth = makeGroundDepth()
         val frame = MetricDepthFrame(depth, WIDTH, HEIGHT, timestampMs = 1L)
         val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
         val classMap = ByteArray(depth.size)
         val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
 
         NativeGroundFilter(
             GroundFilterConfig(fitRoiTop = 0.35f, sampleStep = 2),
         ).use { filter ->
-            assertTrue(filter.process(frame, occupancy, classMap, metrics))
+            assertTrue(filter.process(frame, occupancy, distance, classMap, metrics))
             filter.reset()
-            assertTrue(filter.process(frame, occupancy, null, metrics))
+            assertTrue(filter.process(frame, occupancy, distance, null, metrics))
         }
 
         assertArrayEquals(FloatArray(OBSTACLE_GRID_CELL_COUNT), occupancy, 0f)
+        assertArrayEquals(FloatArray(OBSTACLE_GRID_CELL_COUNT), distance, 0f)
         assertArrayEquals(ByteArray(depth.size) { GROUND_CLASS_GROUND }, classMap)
         assertEquals(1.0, metrics[NATIVE_GROUND_FILTER_GROUND_FRACTION_INDEX], 0.0)
         assertEquals(0.0, metrics[NATIVE_GROUND_FILTER_OBSTACLE_FRACTION_INDEX], 0.0)

@@ -18,7 +18,9 @@ class NativeGroundFilter(
     private var nativeHandle = nativeCreate(
         fitRoiTop = config.fitRoiTop,
         classificationRoiTop = config.classificationRoiTop,
-        obstacleMaxDepthMeters = config.obstacleMaxDepthMeters,
+        obstacleEnterDepthMeters = config.obstacleEnterDepthMeters,
+        obstacleExitDepthMeters = config.obstacleExitDepthMeters,
+        emergencyDepthMeters = config.emergencyDepthMeters,
         fitMaxDepthMeters = config.fitMaxDepthMeters,
         sampleStep = config.sampleStep,
         maxIterations = config.maxIterations,
@@ -30,12 +32,16 @@ class NativeGroundFilter(
     fun process(
         frame: MetricDepthFrame,
         obstacleOccupancy: FloatArray,
+        obstacleDistanceMeters: FloatArray,
         classMap: ByteArray?,
         metrics: DoubleArray,
     ): Boolean {
         val handle = requireOpenHandle()
         require(obstacleOccupancy.size == OBSTACLE_GRID_CELL_COUNT) {
             "Obstacle occupancy must contain exactly $OBSTACLE_GRID_CELL_COUNT values"
+        }
+        require(obstacleDistanceMeters.size == OBSTACLE_GRID_CELL_COUNT) {
+            "Obstacle distance must contain exactly $OBSTACLE_GRID_CELL_COUNT values"
         }
         require(classMap == null || classMap.size.toLong() == frame.width.toLong() * frame.height) {
             "Class map size must match the metric depth dimensions"
@@ -50,6 +56,7 @@ class NativeGroundFilter(
             width = frame.width,
             height = frame.height,
             obstacleOccupancy = obstacleOccupancy,
+            obstacleDistanceMeters = obstacleDistanceMeters,
             classMap = classMap,
             metrics = metrics,
         )
@@ -76,7 +83,9 @@ class NativeGroundFilter(
     private external fun nativeCreate(
         fitRoiTop: Float,
         classificationRoiTop: Float,
-        obstacleMaxDepthMeters: Float,
+        obstacleEnterDepthMeters: Float,
+        obstacleExitDepthMeters: Float,
+        emergencyDepthMeters: Float,
         fitMaxDepthMeters: Float,
         sampleStep: Int,
         maxIterations: Int,
@@ -88,6 +97,7 @@ class NativeGroundFilter(
         width: Int,
         height: Int,
         obstacleOccupancy: FloatArray,
+        obstacleDistanceMeters: FloatArray,
         classMap: ByteArray?,
         metrics: DoubleArray,
     ): Boolean

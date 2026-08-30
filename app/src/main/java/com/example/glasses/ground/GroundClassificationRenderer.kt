@@ -1,9 +1,9 @@
 package com.example.glasses.ground
 
 internal val GROUND_CLASSIFICATION_INVALID_ARGB: Int = 0xFF000000.toInt()
-internal val GROUND_CLASSIFICATION_GROUND_ARGB: Int = 0xFF00C853.toInt()
+internal val GROUND_CLASSIFICATION_GROUND_ARGB: Int = 0xFF000000.toInt()
 internal val GROUND_CLASSIFICATION_OBSTACLE_ARGB: Int = 0xFFD50000.toInt()
-internal val GROUND_CLASSIFICATION_UNKNOWN_ARGB: Int = 0xFFFFD600.toInt()
+internal val GROUND_CLASSIFICATION_UNKNOWN_ARGB: Int = 0xFF000000.toInt()
 
 internal object GroundClassificationRenderer {
     fun renderArgb(

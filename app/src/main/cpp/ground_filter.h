@@ -11,6 +11,7 @@ namespace glasses::ground {
 
 constexpr std::size_t kObstacleGridSize = 64;
 constexpr std::size_t kObstacleGridCellCount = kObstacleGridSize * kObstacleGridSize;
+constexpr std::size_t kObstacleDepthHistogramBins = 16;
 
 struct PlaneCoefficients {
     double a = 0.0;
@@ -219,7 +220,9 @@ enum class GroundClass : std::uint8_t {
 
 struct GroundClassificationConfig {
     double classification_roi_top = 0.0;
-    double obstacle_max_depth = 5.0;
+    double obstacle_enter_depth = 3.0;
+    double obstacle_exit_depth = 3.3;
+    double emergency_depth = 0.8;
     double posterior_threshold = 0.55;
     int morphology_kernel = 3;
     double bottom_seed_fraction = 0.08;
@@ -249,6 +252,9 @@ public:
     const std::array<float, kObstacleGridCellCount>& obstacle_occupancy() const {
         return obstacle_occupancy_;
     }
+    const std::array<float, kObstacleGridCellCount>& obstacle_distance_meters() const {
+        return obstacle_distance_meters_;
+    }
 
     // Keeps allocated capacity so reset does not cause allocation churn on the next frame.
     void Reset();
@@ -265,6 +271,7 @@ private:
     std::vector<std::uint8_t> eroded_mask_;
     std::vector<std::uint8_t> opened_mask_;
     std::vector<std::uint8_t> ground_mask_;
+    std::vector<std::uint8_t> obstacle_range_active_mask_;
     std::vector<std::uint8_t> class_map_;
     struct FloodPixel {
         std::uint32_t index;
@@ -277,7 +284,10 @@ private:
     std::vector<std::uint8_t> row_to_grid_;
     std::array<std::size_t, kObstacleGridCellCount> obstacle_counts_{};
     std::array<std::size_t, kObstacleGridCellCount> total_counts_{};
+    std::array<std::uint32_t, kObstacleGridCellCount * kObstacleDepthHistogramBins>
+        obstacle_depth_histogram_{};
     std::array<float, kObstacleGridCellCount> obstacle_occupancy_{};
+    std::array<float, kObstacleGridCellCount> obstacle_distance_meters_{};
 };
 
 }  // namespace glasses::ground

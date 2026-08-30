@@ -20,13 +20,15 @@ class GroundFilterGoldenParityTest {
         FIXTURES.forEach { fixtureName ->
             val fixture = loadFixture(fixtureName)
             val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+            val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
             val classMap = ByteArray(fixture.depth.size)
             val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
             val actualFitSucceeded = NativeGroundFilter(
                 GroundFilterConfig(
                     fitRoiTop = fixture.fitRoiTop,
                     classificationRoiTop = fixture.classificationRoiTop,
-                    obstacleMaxDepthMeters = fixture.obstacleMaxDepth,
+                    obstacleEnterDepthMeters = fixture.obstacleMaxDepth,
+                    obstacleExitDepthMeters = fixture.obstacleMaxDepth + 0.3f,
                     fitMaxDepthMeters = fixture.fitMaxDepth,
                     sampleStep = fixture.sampleStep,
                     maxIterations = fixture.maxIterations,
@@ -40,6 +42,7 @@ class GroundFilterGoldenParityTest {
                         timestampMs = 1L,
                     ),
                     occupancy,
+                    distance,
                     classMap,
                     metrics,
                 )

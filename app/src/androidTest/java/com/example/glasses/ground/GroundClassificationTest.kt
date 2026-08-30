@@ -78,19 +78,69 @@ class GroundClassificationTest {
         val plane = makeGroundDepth()
         val depth = FloatArray(WIDTH * HEIGHT) { Float.NaN }
         copyRect(plane, depth, top = 60, bottom = HEIGHT, left = 0, right = WIDTH)
-        copyRect(plane, depth, top = 10, bottom = 32, left = 54, right = 106)
+        copyRect(plane, depth, top = 26, bottom = 48, left = 54, right = 106)
 
         val result = process(depth)
 
         assertTrue(result.fitSucceeded)
         assertTrue(classFraction(result.classMap, 64, HEIGHT, 4, WIDTH - 4, GROUND_CLASS_GROUND) > 0.95)
-        assertEquals(0.0, classFraction(result.classMap, 12, 30, 56, 104, GROUND_CLASS_GROUND), 0.0)
-        assertTrue(classFraction(result.classMap, 12, 30, 56, 104, GROUND_CLASS_OBSTACLE) > 0.95)
+        assertEquals(0.0, classFraction(result.classMap, 28, 46, 56, 104, GROUND_CLASS_GROUND), 0.0)
+        assertTrue(classFraction(result.classMap, 28, 46, 56, 104, GROUND_CLASS_OBSTACLE) > 0.95)
+    }
+
+    @Test
+    fun distanceRangeUsesEnterExitHysteresisAndResetClearsIt() {
+        val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val classMap = ByteArray(WIDTH * HEIGHT)
+        val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
+        val filter = NativeGroundFilter(
+            GroundFilterConfig(
+                fitRoiTop = 0.45f,
+                classificationRoiTop = 0f,
+                sampleStep = 2,
+            ),
+        )
+        try {
+            fun process(leftDepth: Float, rightDepth: Float? = null): Boolean {
+                val values = makeGroundDepth()
+                fillRect(values, top = 6, bottom = 22, left = 16, right = 48, value = leftDepth)
+                rightDepth?.let { value ->
+                    fillRect(values, top = 6, bottom = 22, left = 112, right = 144, value = value)
+                }
+                return filter.process(
+                    MetricDepthFrame(values, WIDTH, HEIGHT, timestampMs = 1L),
+                    occupancy,
+                    distance,
+                    classMap,
+                    metrics,
+                )
+            }
+
+            assertTrue(process(leftDepth = 2.9f))
+            assertTrue(classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE) > 0.65)
+            assertTrue(distance.any { it in 2.8f..3.1f })
+
+            assertTrue(process(leftDepth = 3.1f, rightDepth = 3.1f))
+            assertTrue(classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE) > 0.40)
+            assertEquals(0.0, classFraction(classMap, 6, 22, 112, 144, GROUND_CLASS_OBSTACLE), 0.0)
+
+            assertTrue(process(leftDepth = 3.4f))
+            assertEquals(0.0, classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE), 0.0)
+
+            assertTrue(process(leftDepth = 2.9f))
+            filter.reset()
+            assertTrue(process(leftDepth = 3.1f))
+            assertEquals(0.0, classFraction(classMap, 6, 22, 16, 48, GROUND_CLASS_OBSTACLE), 0.0)
+        } finally {
+            filter.close()
+        }
     }
 
     private fun process(depth: FloatArray): ClassificationResult {
         val frame = MetricDepthFrame(depth, WIDTH, HEIGHT, timestampMs = 1L)
         val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
         val classMap = ByteArray(depth.size)
         val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
         val fitSucceeded = NativeGroundFilter(
@@ -100,7 +150,7 @@ class GroundClassificationTest {
                 sampleStep = 2,
             ),
         ).use { filter ->
-            filter.process(frame, occupancy, classMap, metrics)
+            filter.process(frame, occupancy, distance, classMap, metrics)
         }
         assertTrue(metrics[NATIVE_GROUND_FILTER_PROCESSING_MS_INDEX] >= 0.0)
         return ClassificationResult(fitSucceeded, classMap, metrics)

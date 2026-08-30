@@ -196,6 +196,7 @@ internal class DepthAudioCoordinator internal constructor(
         return processor.submit(
             ObstacleGridFrame(
                 occupancy = frame.obstacleOccupancy,
+                distanceMeters = frame.obstacleDistanceMeters,
                 timestampMs = frame.timestampMs,
                 fitSucceeded = frame.fitSucceeded,
             ),

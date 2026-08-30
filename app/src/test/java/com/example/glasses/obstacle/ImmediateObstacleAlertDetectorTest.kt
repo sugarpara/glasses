@@ -14,6 +14,9 @@ class ImmediateObstacleAlertDetectorTest {
         val processed = ObstacleGridTransform().process(
             ObstacleGridFrame(
                 occupancy = occupancy,
+                distanceMeters = FloatArray(OBSTACLE_GRID_CELL_COUNT) { index ->
+                    if (occupancy[index] > 0.0f) 1.0f else 0.0f
+                },
                 timestampMs = 1_234L,
                 fitSucceeded = true,
             ),

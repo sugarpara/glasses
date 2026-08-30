@@ -73,6 +73,7 @@ class PipelinePerformanceMonitorTest {
         groundFilter = GroundFilterFrame(
             classMap = null,
             obstacleOccupancy = FloatArray(64 * 64),
+            obstacleDistanceMeters = FloatArray(64 * 64),
             width = 2,
             height = 2,
             timestampMs = 1L,

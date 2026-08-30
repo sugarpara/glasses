@@ -86,6 +86,7 @@ class GroundOccupancyTest {
         sampleStep: Int,
     ): OccupancyResult {
         val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT) { Float.NaN }
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT) { Float.NaN }
         val classMap = if (withClassMap) ByteArray(depth.size) else null
         val metrics = DoubleArray(NATIVE_GROUND_FILTER_METRIC_COUNT)
         val fitSucceeded = NativeGroundFilter(
@@ -98,6 +99,7 @@ class GroundOccupancyTest {
             filter.process(
                 MetricDepthFrame(depth, width, height, timestampMs = 1L),
                 occupancy,
+                distance,
                 classMap,
                 metrics,
             )

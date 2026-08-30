@@ -11,6 +11,9 @@ class GroundFilterConfigTest {
 
         assertEquals(0.45f, config.fitRoiTop, 0f)
         assertEquals(0f, config.classificationRoiTop, 0f)
+        assertEquals(3.0f, config.obstacleEnterDepthMeters, 0f)
+        assertEquals(3.3f, config.obstacleExitDepthMeters, 0f)
+        assertEquals(0.8f, config.emergencyDepthMeters, 0f)
         assertEquals(8, config.sampleStep)
     }
 
@@ -30,7 +33,13 @@ class GroundFilterConfigTest {
     fun rejectsNonPositiveOrNonFiniteDistances() {
         listOf(0f, -1f, Float.NaN, Float.POSITIVE_INFINITY).forEach { distance ->
             assertThrows(IllegalArgumentException::class.java) {
-                GroundFilterConfig(obstacleMaxDepthMeters = distance)
+                GroundFilterConfig(obstacleEnterDepthMeters = distance)
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                GroundFilterConfig(obstacleExitDepthMeters = distance)
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                GroundFilterConfig(emergencyDepthMeters = distance)
             }
             assertThrows(IllegalArgumentException::class.java) {
                 GroundFilterConfig(fitMaxDepthMeters = distance)
@@ -39,9 +48,15 @@ class GroundFilterConfigTest {
     }
 
     @Test
-    fun rejectsFitDistanceBelowObstacleDistance() {
+    fun rejectsInvalidDistanceOrdering() {
         assertThrows(IllegalArgumentException::class.java) {
-            GroundFilterConfig(obstacleMaxDepthMeters = 6f, fitMaxDepthMeters = 5f)
+            GroundFilterConfig(emergencyDepthMeters = 3.0f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GroundFilterConfig(obstacleExitDepthMeters = 3.0f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GroundFilterConfig(obstacleExitDepthMeters = 6f, fitMaxDepthMeters = 5f)
         }
     }
 
