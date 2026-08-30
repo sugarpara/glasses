@@ -31,7 +31,7 @@ internal enum class DepthAudioCoordinatorStatus {
     STOPPED,
     WAITING_FOR_FRAME,
     ACTIVE,
-    DEGRADED_GROUND_FIT,
+    DEPTH_ONLY,
     STALE,
     ERROR,
 }
@@ -208,29 +208,25 @@ internal class DepthAudioCoordinator internal constructor(
         latestFrame.set(frame)
         val activeObstacleCount = frame.activeMask.count { it }
 
-        if (!frame.fitSucceeded) {
-            mutableState.update {
-                it.copy(
-                    latestInputTimestampMs = frame.timestampMs,
-                    fitSucceeded = false,
-                    activeObstacleCount = activeObstacleCount,
-                    lastGridProcessingMs = frame.processingMs,
-                    errorMessage = null,
-                )
-            }
-            invalidateAudio(DepthAudioCoordinatorStatus.DEGRADED_GROUND_FIT)
-            return
+        val modeStatus = if (frame.fitSucceeded) {
+            DepthAudioCoordinatorStatus.ACTIVE
+        } else {
+            DepthAudioCoordinatorStatus.DEPTH_ONLY
         }
-
         mutableState.update {
             it.copy(
-                status = DepthAudioCoordinatorStatus.ACTIVE,
+                status = modeStatus,
                 latestInputTimestampMs = frame.timestampMs,
-                fitSucceeded = true,
+                fitSucceeded = frame.fitSucceeded,
                 activeObstacleCount = activeObstacleCount,
                 lastGridProcessingMs = frame.processingMs,
                 errorMessage = null,
             )
+        }
+
+        if (activeObstacleCount == 0) {
+            if (mainPlaybackActive.get()) invalidateAudio(modeStatus)
+            return
         }
 
         // Appearance-based immediate alerts stay disabled until distance thresholds replace them.
@@ -285,7 +281,7 @@ internal class DepthAudioCoordinator internal constructor(
     }
 
     private fun canPlay(frame: ProcessedObstacleGridFrame?): Boolean =
-        running.get() && !closed.get() && frame?.fitSucceeded == true && isFresh(frame)
+        running.get() && !closed.get() && frame != null && frame.activeMask.any() && isFresh(frame)
 
     private fun isFresh(frame: ProcessedObstacleGridFrame): Boolean =
         (clock() - frame.timestampMs).coerceAtLeast(0L) <= inputTimeoutMs

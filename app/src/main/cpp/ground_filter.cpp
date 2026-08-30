@@ -925,9 +925,20 @@ GroundClassificationResult GroundClassificationWorkspace::Classify(
             const std::size_t index = row_offset + column;
             GroundClass classification = GroundClass::kInvalid;
             if (IsFinitePositiveDepth(depth[index])) {
-                if (row < classification_roi_start || !fit.succeeded()) {
+                if (row < classification_roi_start) {
                     classification = GroundClass::kUnknown;
                     obstacle_range_active_mask_[index] = 0U;
+                } else if (!fit.succeeded()) {
+                    const double range_limit = obstacle_range_active_mask_[index] != 0U
+                        ? classification_config.obstacle_exit_depth
+                        : classification_config.obstacle_enter_depth;
+                    if (depth[index] <= range_limit) {
+                        classification = GroundClass::kObstacle;
+                        obstacle_range_active_mask_[index] = 1U;
+                    } else {
+                        classification = GroundClass::kUnknown;
+                        obstacle_range_active_mask_[index] = 0U;
+                    }
                 } else if (ground_mask_[index] != 0U) {
                     classification = GroundClass::kGround;
                     obstacle_range_active_mask_[index] = 0U;

@@ -69,6 +69,54 @@ class ObstacleGridProcessorTest {
     }
 
     @Test
+    fun depthOnlyRequiresThreeStableFramesAndKeepsOneNearestCellPerSector() {
+        val transform = ObstacleGridTransform()
+        val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val distance = FloatArray(OBSTACLE_GRID_CELL_COUNT)
+        val expected = listOf(
+            cellIndex(12, 8) to 1.0f,
+            cellIndex(20, 29) to 1.2f,
+            cellIndex(31, 55) to 0.9f,
+        )
+        val farther = listOf(
+            cellIndex(10, 4) to 1.8f,
+            cellIndex(18, 25) to 2.0f,
+            cellIndex(28, 48) to 1.7f,
+        )
+        for ((index, meters) in expected + farther) {
+            occupancy[index] = 1.0f
+            distance[index] = meters
+        }
+
+        fun process(fitSucceeded: Boolean, values: FloatArray = occupancy): ProcessedObstacleGridFrame =
+            transform.process(
+                ObstacleGridFrame(
+                    occupancy = values,
+                    distanceMeters = if (values === occupancy) {
+                        distance
+                    } else {
+                        distanceGrid(values)
+                    },
+                    timestampMs = 1L,
+                    fitSucceeded = fitSucceeded,
+                ),
+            )
+
+        assertEquals(0, process(fitSucceeded = false).activeMask.count { it })
+        assertEquals(0, process(fitSucceeded = false).activeMask.count { it })
+        val stable = process(fitSucceeded = false)
+        assertEquals(3, stable.activeMask.count { it })
+        assertEquals(
+            expected.map { it.first }.toSet(),
+            stable.activeMask.indices.filter { stable.activeMask[it] }.toSet(),
+        )
+
+        val groundAware = process(fitSucceeded = true, values = FloatArray(OBSTACLE_GRID_CELL_COUNT))
+        assertTrue(groundAware.smoothedOccupancy.all { it == 0.0f })
+        assertFalse(groundAware.activeMask.any { it })
+    }
+
+    @Test
     fun columnRequestsKeepStrongestThreeRegionsAndAllActiveCells() {
         val column = 7
         val occupancy = FloatArray(OBSTACLE_GRID_CELL_COUNT)

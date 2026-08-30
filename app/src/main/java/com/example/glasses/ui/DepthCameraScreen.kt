@@ -237,7 +237,7 @@ private fun BoxScope.RunningDepthFrame(
             text = String.format(
                 Locale.US,
                 "%s | MLE %.1f ms",
-                if (state.groundFitSucceeded) "GROUND FIT" else "NO GROUND FIT",
+                if (state.groundFitSucceeded) "GROUND FILTER" else "DEPTH ONLY",
                 state.groundFilterMs,
             ),
             color = if (state.groundFitSucceeded) FIT_SUCCEEDED_COLOR else FIT_FAILED_COLOR,

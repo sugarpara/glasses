@@ -43,14 +43,22 @@ class NativeGroundFilterTest {
             )
 
             assertFalse(fitSucceeded)
-            assertArrayEquals(FloatArray(OBSTACLE_GRID_CELL_COUNT), occupancy, 0f)
-            assertArrayEquals(FloatArray(OBSTACLE_GRID_CELL_COUNT), distance, 0f)
+            assertEquals(3, occupancy.count { it > 0f })
+            assertEquals(3, distance.count { it > 0f })
             if (iteration % 2 == 0) {
-                assertArrayEquals(ByteArray(frame.values.size) { GROUND_CLASS_UNKNOWN }, classMap)
+                assertArrayEquals(
+                    byteArrayOf(
+                        GROUND_CLASS_OBSTACLE,
+                        GROUND_CLASS_OBSTACLE,
+                        GROUND_CLASS_OBSTACLE,
+                        GROUND_CLASS_UNKNOWN,
+                    ),
+                    classMap,
+                )
             }
             assertEquals(0.0, metrics[NATIVE_GROUND_FILTER_GROUND_FRACTION_INDEX], 0.0)
-            assertEquals(0.0, metrics[NATIVE_GROUND_FILTER_OBSTACLE_FRACTION_INDEX], 0.0)
-            assertEquals(1.0, metrics[NATIVE_GROUND_FILTER_UNKNOWN_FRACTION_INDEX], 0.0)
+            assertEquals(0.75, metrics[NATIVE_GROUND_FILTER_OBSTACLE_FRACTION_INDEX], 0.0)
+            assertEquals(0.25, metrics[NATIVE_GROUND_FILTER_UNKNOWN_FRACTION_INDEX], 0.0)
             assertTrue(metrics[NATIVE_GROUND_FILTER_PROCESSING_MS_INDEX] >= 0.0)
 
             filter.reset()

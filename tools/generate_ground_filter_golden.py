@@ -83,15 +83,21 @@ def classify_full_frame(
     valid_positive = np.isfinite(depth) & (depth > 0.0)
     classes = np.zeros(depth.shape, dtype=np.uint8)
     classes[valid_positive] = 3
-    if model is None:
-        return classes, None
-
-    y, x = np.mgrid[0:height, 0:width]
-    x_normalized = 2.0 * x.astype(np.float64) / max(width - 1, 1) - 1.0
-    y_normalized = y.astype(np.float64) / max(height - 1, 1)
     classification_start = min(
         height - 1, max(0, round(height * classification_roi_top))
     )
+    y, x = np.mgrid[0:height, 0:width]
+    if model is None:
+        depth_only_obstacle = (
+            valid_positive
+            & (y >= classification_start)
+            & (depth <= config.obstacle_max_depth)
+        )
+        classes[depth_only_obstacle] = 2
+        return classes, None
+
+    x_normalized = 2.0 * x.astype(np.float64) / max(width - 1, 1) - 1.0
+    y_normalized = y.astype(np.float64) / max(height - 1, 1)
     fit_start = min(height - 1, max(0, round(height * config.roi_top)))
     analysis_roi = y >= classification_start
     plane_valid = (

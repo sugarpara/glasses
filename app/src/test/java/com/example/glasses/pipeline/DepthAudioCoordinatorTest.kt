@@ -38,7 +38,7 @@ class DepthAudioCoordinatorTest {
 
             clock.set(1_100L)
             coordinator.submit(frame(timestampMs = 1_100L, value = 0f))
-            await { coordinator.processorStats.value.processedFrameCount == 2L }
+            await { coordinator.state.value.latestInputTimestampMs == 1_100L }
             assertEquals(1, output.soundscapeCalls.size)
 
             output.finishSoundscape(0)
@@ -54,7 +54,7 @@ class DepthAudioCoordinatorTest {
     }
 
     @Test
-    fun failedGroundFitPublishesDegradedStateAndDoesNotPlaySafeSoundscape() {
+    fun failedGroundFitUsesStableDepthOnlySoundscape() {
         val clock = AtomicLong(2_000L)
         val output = FakeDepthAudioOutput()
         val executor = Executors.newSingleThreadExecutor()
@@ -67,11 +67,20 @@ class DepthAudioCoordinatorTest {
         )
         try {
             coordinator.start()
-            coordinator.submit(frame(timestampMs = 2_000L, fitSucceeded = false, value = 0f))
-
-            await { coordinator.state.value.status == DepthAudioCoordinatorStatus.DEGRADED_GROUND_FIT }
-            assertTrue(output.stopCount > 0)
+            coordinator.submit(frame(timestampMs = 2_000L, fitSucceeded = false, value = 1f))
+            await { coordinator.processorStats.value.processedFrameCount == 1L }
+            assertEquals(DepthAudioCoordinatorStatus.DEPTH_ONLY, coordinator.state.value.status)
             assertTrue(output.soundscapeCalls.isEmpty())
+
+            coordinator.submit(frame(timestampMs = 2_010L, fitSucceeded = false, value = 1f))
+            await { coordinator.processorStats.value.processedFrameCount == 2L }
+            assertTrue(output.soundscapeCalls.isEmpty())
+
+            coordinator.submit(frame(timestampMs = 2_020L, fitSucceeded = false, value = 1f))
+            await { output.soundscapeCalls.size == 1 }
+
+            assertEquals(DepthAudioCoordinatorStatus.DEPTH_ONLY, coordinator.state.value.status)
+            assertEquals(1, output.soundscapeCalls.single().requests.sumOf { it.activeCells.size })
             assertTrue(output.immediateCalls.isEmpty())
         } finally {
             coordinator.close()
@@ -95,7 +104,7 @@ class DepthAudioCoordinatorTest {
         )
         try {
             coordinator.start()
-            coordinator.submit(frame(timestampMs = 3_000L, value = 0f))
+            coordinator.submit(frame(timestampMs = 3_000L, value = 1f))
             await { output.soundscapeCalls.size == 1 }
 
             clock.set(3_351L)

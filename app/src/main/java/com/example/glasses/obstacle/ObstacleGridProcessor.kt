@@ -23,6 +23,8 @@ private const val CURRENT_OCCUPANCY_WEIGHT = 0.30f
 private const val PREVIOUS_OCCUPANCY_WEIGHT = 0.70f
 private const val HYSTERESIS_ON_THRESHOLD = 0.55f
 private const val HYSTERESIS_OFF_THRESHOLD = 0.35f
+private const val DEPTH_ONLY_STABLE_FRAME_COUNT = 3
+private const val DEPTH_ONLY_AUDIO_SECTOR_COUNT = 3
 
 internal data class ProcessedObstacleGridFrame(
     val smoothedOccupancy: FloatArray,
@@ -61,12 +63,21 @@ internal class ObstacleGridTransform {
     private var previousOccupancy: FloatArray? = null
     private var previousDistanceMeters: FloatArray? = null
     private var activeStates = BooleanArray(OBSTACLE_GRID_CELL_COUNT)
+    private var previousFitSucceeded: Boolean? = null
+    private var depthOnlyStableFrameCounts = IntArray(OBSTACLE_GRID_CELL_COUNT)
 
     @Synchronized
     fun process(frame: ObstacleGridFrame): ProcessedObstacleGridFrame {
+        resetForModeChange(frame.fitSucceeded)
         val smoothed = smooth(frame.occupancy)
         val smoothedDistance = smoothDistance(frame.distanceMeters)
-        val active = updateHysteresis(smoothed)
+        val hysteresisActive = updateHysteresis(smoothed)
+        val active = if (frame.fitSucceeded) {
+            depthOnlyStableFrameCounts.fill(0)
+            hysteresisActive
+        } else {
+            buildDepthOnlyAudioMask(frame, hysteresisActive, smoothedDistance)
+        }
         clearInactiveDistances(smoothedDistance, active)
         return ProcessedObstacleGridFrame(
             smoothedOccupancy = smoothed,
@@ -85,6 +96,19 @@ internal class ObstacleGridTransform {
         previousOccupancy = null
         previousDistanceMeters = null
         activeStates = BooleanArray(OBSTACLE_GRID_CELL_COUNT)
+        previousFitSucceeded = null
+        depthOnlyStableFrameCounts = IntArray(OBSTACLE_GRID_CELL_COUNT)
+    }
+
+    private fun resetForModeChange(fitSucceeded: Boolean) {
+        val previousMode = previousFitSucceeded
+        if (previousMode != null && previousMode != fitSucceeded) {
+            previousOccupancy = null
+            previousDistanceMeters = null
+            activeStates.fill(false)
+            depthOnlyStableFrameCounts.fill(0)
+        }
+        previousFitSucceeded = fitSucceeded
     }
 
     private fun smooth(current: FloatArray): FloatArray {
@@ -112,6 +136,51 @@ internal class ObstacleGridTransform {
             }
         }
         return activeStates.copyOf()
+    }
+
+    private fun buildDepthOnlyAudioMask(
+        frame: ObstacleGridFrame,
+        hysteresisActive: BooleanArray,
+        smoothedDistanceMeters: FloatArray,
+    ): BooleanArray {
+        for (index in hysteresisActive.indices) {
+            depthOnlyStableFrameCounts[index] = if (
+                hysteresisActive[index] &&
+                frame.occupancy[index] >= HYSTERESIS_ON_THRESHOLD &&
+                frame.distanceMeters[index] > 0.0f
+            ) {
+                (depthOnlyStableFrameCounts[index] + 1)
+                    .coerceAtMost(DEPTH_ONLY_STABLE_FRAME_COUNT)
+            } else {
+                0
+            }
+        }
+
+        val selected = BooleanArray(OBSTACLE_GRID_CELL_COUNT)
+        for (sector in 0 until DEPTH_ONLY_AUDIO_SECTOR_COUNT) {
+            val startColumn = sector * OBSTACLE_GRID_COLUMNS / DEPTH_ONLY_AUDIO_SECTOR_COUNT
+            val endColumn = (sector + 1) * OBSTACLE_GRID_COLUMNS /
+                DEPTH_ONLY_AUDIO_SECTOR_COUNT
+            var selectedIndex = -1
+            for (column in startColumn until endColumn) {
+                for (row in 0 until OBSTACLE_GRID_ROWS) {
+                    val index = cellIndex(row, column)
+                    if (depthOnlyStableFrameCounts[index] < DEPTH_ONLY_STABLE_FRAME_COUNT) continue
+                    if (
+                        selectedIndex < 0 ||
+                        smoothedDistanceMeters[index] < smoothedDistanceMeters[selectedIndex] ||
+                        (
+                            smoothedDistanceMeters[index] == smoothedDistanceMeters[selectedIndex] &&
+                            frame.occupancy[index] > frame.occupancy[selectedIndex]
+                        )
+                    ) {
+                        selectedIndex = index
+                    }
+                }
+            }
+            if (selectedIndex >= 0) selected[selectedIndex] = true
+        }
+        return selected
     }
 
     private fun smoothDistance(current: FloatArray): FloatArray {
