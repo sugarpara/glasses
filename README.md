@@ -262,10 +262,25 @@ GPU 初始化、预热或张量解析失败时，`LiteRtDepthModel` 会释放已
 - Android SDK 37。
 - NDK `30.0.16138531` 和 CMake 3.22.1。
 - Android 8.0（API 26）或更高版本的模拟器/真机。
+- 当前 native 库只构建 `arm64-v8a`，真机必须支持 64 位 ARM 应用。
 - 真机运行需要开启开发者选项和 USB 调试。
 
 项目的依赖仓库优先使用阿里云 Google/Public 镜像，然后回退到 `google()` 和
 `mavenCentral()`。
+
+### 从 GitHub 获取项目
+
+```powershell
+git clone https://github.com/xcwu666-maker/glasses.git
+cd glasses
+```
+
+首次打开时，在 Android Studio 的 SDK Manager 中安装 Android SDK 37、NDK
+`30.0.16138531` 和 CMake 3.22.1，然后等待 Gradle Sync 完成。Android Studio 会根据
+队友自己的 SDK 目录生成 `local.properties`；不要复制或提交其他电脑的该文件。
+
+模型 `yolo26n-depth_w8a32.tflite` 和运行声音所需的 HRTF 资源已经包含在仓库中，clone
+后不需要再从你的电脑手动复制 assets。
 
 ### Android Studio 运行
 
