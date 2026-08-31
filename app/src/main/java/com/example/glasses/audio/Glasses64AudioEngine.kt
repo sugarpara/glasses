@@ -2,7 +2,9 @@ package com.example.glasses.audio
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
@@ -275,7 +277,8 @@ internal data class Glasses64CalibrationProbe(
  * zero with a short output fade to avoid boundary clicks.
  */
 internal class Glasses64AudioEngine(
-    context: Context
+    context: Context,
+    private val preferLocalOutput: Boolean = false,
 ) : AutoCloseable {
 
     private val appContext = context.applicationContext
@@ -1387,6 +1390,7 @@ internal class Glasses64AudioEngine(
             .setBufferSizeInBytes(bufferSizeBytes)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+        if (preferLocalOutput) preferLocalOutput(audioTrack)
         currentAudioTrack.set(audioTrack)
         updateMainSoundscapeVolume()
 
@@ -1422,6 +1426,31 @@ internal class Glasses64AudioEngine(
         } finally {
             currentAudioTrack.compareAndSet(audioTrack, null)
             stopAndReleaseTrack(audioTrack)
+        }
+    }
+
+    private fun preferLocalOutput(audioTrack: AudioTrack) {
+        val audioManager = appContext.getSystemService(AudioManager::class.java) ?: return
+        val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val preferredTypes = intArrayOf(
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+        )
+        var preferredDevice: AudioDeviceInfo? = null
+        for (type in preferredTypes) {
+            preferredDevice = outputs.firstOrNull { device -> device.type == type }
+            if (preferredDevice != null) break
+        }
+        preferredDevice ?: return
+        if (!audioTrack.setPreferredDevice(preferredDevice)) {
+            Log.w(
+                "Glasses64Audio",
+                "Unable to select local output type=${preferredDevice.type}",
+            )
         }
     }
 

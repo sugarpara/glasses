@@ -128,26 +128,29 @@ class DepthEstimator(
         val afterGroundFilter = System.nanoTime()
 
         var depthBitmap: Bitmap? = null
+        var classificationBitmap: Bitmap? = null
         try {
             val statistics = summarizeMetricDepth(output)
-            depthBitmap = when {
-                renderClassificationBitmap -> createClassificationBitmap(
+            if (renderDepthBitmap) {
+                depthBitmap = createDepthBitmap(
+                    values = output,
+                    range = DepthRange(statistics.min, statistics.max),
+                )
+            }
+            if (renderClassificationBitmap) {
+                classificationBitmap = createClassificationBitmap(
                     classMap = checkNotNull(requestedClassMap),
                     width = metricDepth.width,
                     height = metricDepth.height,
                 )
-                renderDepthBitmap -> createDepthBitmap(
-                    values = output,
-                    range = DepthRange(statistics.min, statistics.max),
-                )
-                else -> null
             }
+            val primaryBitmap = depthBitmap ?: classificationBitmap
             val afterRender = System.nanoTime()
 
             val frame = DepthFrame(
                 metricDepth = metricDepth,
                 groundFilter = groundFilterFrame,
-                bitmap = depthBitmap,
+                bitmap = primaryBitmap,
                 accelerator = model.accelerator,
                 minDepth = statistics.min,
                 maxDepth = statistics.max,
@@ -159,11 +162,17 @@ class DepthEstimator(
                 inferenceMs = nanosToMs(afterInference - afterPre),
                 groundFilterMs = nanosToMs(afterGroundFilter - afterInference),
                 renderMs = nanosToMs(afterRender - afterGroundFilter),
+                classificationBitmap = classificationBitmap
+                    ?.takeUnless { it === primaryBitmap },
             )
-            depthBitmap = null
+            if (depthBitmap === primaryBitmap) depthBitmap = null
+            if (classificationBitmap === primaryBitmap || frame.classificationBitmap != null) {
+                classificationBitmap = null
+            }
             return frame
         } finally {
             depthBitmap?.recycle()
+            classificationBitmap?.recycle()
         }
     }
 

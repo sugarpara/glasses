@@ -33,6 +33,8 @@ class DepthCameraViewModel(
         DepthCameraUiState.LoadingModel,
     )
     val state: StateFlow<DepthCameraUiState> = mutableState.asStateFlow()
+    private val mutableAudioState = MutableStateFlow(DepthAudioUiState())
+    internal val audioState: StateFlow<DepthAudioUiState> = mutableAudioState.asStateFlow()
 
     private val initializing = AtomicBoolean(false)
     private val processing = AtomicBoolean(false)
@@ -93,15 +95,15 @@ class DepthCameraViewModel(
 
         viewModelScope.launch(Dispatchers.Default) {
             var unpublishedBitmap: Bitmap? = null
+            var unpublishedClassificationBitmap: Bitmap? = null
             try {
-                val classificationEnabled = classificationDisplayEnabled.get()
                 val nowMs = SystemClock.elapsedRealtime()
                 val renderDepth = depthRenderThrottle.shouldRender(
-                    enabled = !classificationEnabled,
+                    enabled = true,
                     nowMs = nowMs,
                 )
                 val renderClassification = classificationRenderThrottle.shouldRender(
-                    enabled = classificationEnabled,
+                    enabled = true,
                     nowMs = nowMs,
                 )
                 val frame = activeEstimator.predict(
@@ -112,7 +114,9 @@ class DepthCameraViewModel(
                 performanceMonitor.recordProcessedFrame(frame)
                 audioCoordinator?.submit(frame.groundFilter)
                 val displayBitmap = frame.bitmap
+                val classificationBitmap = frame.classificationBitmap
                 unpublishedBitmap = displayBitmap
+                unpublishedClassificationBitmap = classificationBitmap
                 val now = System.nanoTime()
                 val instantFps = if (lastFrameTimeNanos == 0L) {
                     0.0
@@ -133,6 +137,16 @@ class DepthCameraViewModel(
                         "The first visible frame must render a display bitmap"
                     }
                 }
+                val classificationImage = if (classificationBitmap != null) {
+                    withContext(Dispatchers.Main) { classificationBitmap.asImageBitmap() }
+                } else {
+                    checkNotNull(
+                        (mutableState.value as? DepthCameraUiState.Running)
+                            ?.classificationImage,
+                    ) {
+                        "The first visible frame must render a classification bitmap"
+                    }
+                }
                 val groundFilter = frame.groundFilter
                 var activeObstacleCells = 0
                 var maxObstacleOccupancy = 0.0f
@@ -147,6 +161,7 @@ class DepthCameraViewModel(
                 val publishedAtNanos = System.nanoTime()
                 mutableState.value = DepthCameraUiState.Running(
                     image = image,
+                    classificationImage = classificationImage,
                     classificationDisplayEnabled = classificationDisplayEnabled.get(),
                     accelerator = frame.accelerator,
                     fps = smoothedFps,
@@ -164,12 +179,14 @@ class DepthCameraViewModel(
                     performancePublishedAtNanos = publishedAtNanos,
                 )
                 unpublishedBitmap = null
+                unpublishedClassificationBitmap = null
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
                 mutableState.value = DepthCameraUiState.Error(error.toDisplayMessage())
             } finally {
                 unpublishedBitmap?.recycle()
+                unpublishedClassificationBitmap?.recycle()
                 bitmap.recycle()
                 processing.set(false)
             }
@@ -242,6 +259,16 @@ class DepthCameraViewModel(
             var previousSoundscapes = 0L
             var previousAlerts = 0L
             coordinator.state.collect { state ->
+                mutableAudioState.value = DepthAudioUiState(
+                    status = state.status,
+                    activeObstacleCount = state.activeObstacleCount,
+                    soundscapeRenderCount = state.soundscapeRenderCount,
+                    leftWaveform = state.leftWaveform,
+                    rightWaveform = state.rightWaveform,
+                    leftSpectrum = state.leftSpectrum,
+                    rightSpectrum = state.rightSpectrum,
+                    errorMessage = state.errorMessage,
+                )
                 if (state.soundscapeRenderCount < previousSoundscapes) previousSoundscapes = 0L
                 if (state.immediateAlertCount < previousAlerts) previousAlerts = 0L
                 val soundscapeDelta = state.soundscapeRenderCount - previousSoundscapes

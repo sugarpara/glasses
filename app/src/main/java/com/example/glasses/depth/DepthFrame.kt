@@ -4,8 +4,9 @@ import android.graphics.Bitmap
 import com.example.glasses.ground.GroundFilterFrame
 
 /**
- * One inference result. [metricDepth] is the authoritative model output; [bitmap] is an optional
- * visualization owned by the caller and is never used as input to downstream depth processing.
+ * One inference result. [metricDepth] is the authoritative model output; [bitmap] and
+ * [classificationBitmap] are optional visualizations owned by the caller and are never used as
+ * input to downstream depth processing.
  * Percentiles are approximated from at most 4096 evenly spaced valid depth samples.
  */
 data class DepthFrame(
@@ -23,6 +24,7 @@ data class DepthFrame(
     val inferenceMs: Double,
     val groundFilterMs: Double,
     val renderMs: Double,
+    val classificationBitmap: Bitmap? = null,
 ) {
     val postProcessMs: Double
         get() = groundFilterMs + renderMs

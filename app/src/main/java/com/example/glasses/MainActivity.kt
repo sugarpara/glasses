@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.example.glasses.ui.DepthCameraScreen
+import com.example.glasses.ui.GlassesApp
 import com.example.glasses.ui.theme.GlassesTheme
 
 class MainActivity : ComponentActivity() {
@@ -13,7 +13,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GlassesTheme {
-                DepthCameraScreen()
+                GlassesApp()
             }
         }
     }

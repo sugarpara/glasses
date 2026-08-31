@@ -12,6 +12,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class DepthAudioCoordinatorTest {
     @Test
@@ -140,6 +144,56 @@ class DepthAudioCoordinatorTest {
         }
     }
 
+    @Test
+    fun preparedStereoPcmPublishesIndependentLeftAndRightWaveforms() {
+        val output = FakeDepthAudioOutput()
+        val executor = Executors.newSingleThreadExecutor()
+        val dispatcher = executor.asCoroutineDispatcher()
+        val coordinator = DepthAudioCoordinator(
+            audioOutput = output,
+            clock = { 5_000L },
+            processorDispatcher = dispatcher,
+            coordinatorDispatcher = dispatcher,
+        )
+        try {
+            coordinator.start()
+            coordinator.submit(frame(timestampMs = 5_000L, value = 1f))
+            await { output.soundscapeCalls.size == 1 }
+
+            val sampleRate = 48_000
+            val pcm = ShortArray(4_096 * 2)
+            repeat(pcm.size / 2) { frameIndex ->
+                val time = frameIndex.toDouble() / sampleRate
+                pcm[frameIndex * 2] = (sin(2.0 * PI * 750.0 * time) * 24_000)
+                    .roundToInt()
+                    .toShort()
+                pcm[frameIndex * 2 + 1] = (sin(2.0 * PI * 6_000.0 * time) * 4_000)
+                    .roundToInt()
+                    .toShort()
+            }
+            output.prepareSoundscape(0, pcm, sampleRate)
+
+            await {
+                coordinator.state.value.leftWaveform.isNotEmpty() &&
+                    coordinator.state.value.leftSpectrum.isNotEmpty()
+            }
+            val state = coordinator.state.value
+            assertEquals(state.leftWaveform.size, state.rightWaveform.size)
+            assertTrue(state.leftWaveform.size in 1..80)
+            val leftPeak = state.leftWaveform.maxOf { maxOf(abs(it.minimum), abs(it.maximum)) }
+            val rightPeak = state.rightWaveform.maxOf { maxOf(abs(it.minimum), abs(it.maximum)) }
+            assertTrue(leftPeak > rightPeak * 5f)
+            val leftFrequency = state.leftSpectrum.maxBy { it.level }.centerFrequencyHz
+            val rightFrequency = state.rightSpectrum.maxBy { it.level }.centerFrequencyHz
+            assertTrue(leftFrequency in 650f..1_000f)
+            assertTrue(rightFrequency in 5_800f..6_400f)
+        } finally {
+            coordinator.close()
+            dispatcher.close()
+            executor.shutdownNow()
+        }
+    }
+
     private fun frame(
         timestampMs: Long,
         fitSucceeded: Boolean = true,
@@ -178,6 +232,7 @@ private class FakeDepthAudioOutput : DepthAudioOutput {
         val requests: List<Glasses64ColumnRequest>,
         val onFinished: () -> Unit,
         val onStopped: () -> Unit,
+        val onPrepared: (ShortArray, Int) -> Unit,
     )
 
     data class ImmediateCall(
@@ -203,8 +258,9 @@ private class FakeDepthAudioOutput : DepthAudioOutput {
         onStopped: () -> Unit,
         onError: (String) -> Unit,
         onRendered: (Double) -> Unit,
+        onPrepared: (ShortArray, Int) -> Unit,
     ) {
-        soundscapeCalls += SoundscapeCall(requests, onFinished, onStopped)
+        soundscapeCalls += SoundscapeCall(requests, onFinished, onStopped, onPrepared)
     }
 
     override fun playImmediateObstacleAlert(
@@ -221,6 +277,10 @@ private class FakeDepthAudioOutput : DepthAudioOutput {
 
     fun finishSoundscape(index: Int) {
         soundscapeCalls[index].onFinished()
+    }
+
+    fun prepareSoundscape(index: Int, pcm: ShortArray, sampleRate: Int) {
+        soundscapeCalls[index].onPrepared(pcm, sampleRate)
     }
 
     override fun stop() {

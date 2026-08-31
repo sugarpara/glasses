@@ -1,6 +1,20 @@
 package com.example.glasses.ui
 
 import androidx.compose.ui.graphics.ImageBitmap
+import com.example.glasses.pipeline.AudioSpectrumBar
+import com.example.glasses.pipeline.AudioWaveformBar
+import com.example.glasses.pipeline.DepthAudioCoordinatorStatus
+
+internal data class DepthAudioUiState(
+    val status: DepthAudioCoordinatorStatus = DepthAudioCoordinatorStatus.STOPPED,
+    val activeObstacleCount: Int = 0,
+    val soundscapeRenderCount: Long = 0L,
+    val leftWaveform: List<AudioWaveformBar> = emptyList(),
+    val rightWaveform: List<AudioWaveformBar> = emptyList(),
+    val leftSpectrum: List<AudioSpectrumBar> = emptyList(),
+    val rightSpectrum: List<AudioSpectrumBar> = emptyList(),
+    val errorMessage: String? = null,
+)
 
 sealed interface DepthCameraUiState {
     data object LoadingModel : DepthCameraUiState
@@ -8,6 +22,7 @@ sealed interface DepthCameraUiState {
 
     data class Running(
         val image: ImageBitmap,
+        val classificationImage: ImageBitmap,
         val classificationDisplayEnabled: Boolean,
         val accelerator: String,
         val fps: Double,
