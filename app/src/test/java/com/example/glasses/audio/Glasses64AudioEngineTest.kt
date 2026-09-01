@@ -27,6 +27,30 @@ class Glasses64AudioEngineTest {
     }
 
     @Test
+    fun legacyUpperPitchIsClearlySeparatedFromTheMiddleBand() {
+        val upperPitches = (0..2).map { band ->
+            glasses64LegacyPitchHz(band, "MEDIUM")
+        }
+        val middlePitch = glasses64LegacyPitchHz(3, "MEDIUM")
+
+        assertTrue(upperPitches.zipWithNext().all { (first, second) -> first > second })
+        assertTrue(upperPitches.last() >= middlePitch * 2.5)
+    }
+
+    @Test
+    fun legacyUpperPitchKeepsAnAudibleToneComponent() {
+        val upperToneRatios = (0..2).map { band ->
+            glasses64LegacyToneRatio(
+                legacyBand = band,
+                upperClear = true,
+                lowerClear = false
+            )
+        }
+
+        assertTrue(upperToneRatios.all { ratio -> ratio >= 0.20f })
+    }
+
+    @Test
     fun unknownSavedModeFallsBackToLegacy() {
         assertEquals(
             Glasses64VerticalSoundMode.LEGACY_SIX_BAND,

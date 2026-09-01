@@ -192,6 +192,58 @@ internal fun glasses64ModeOutputGain(
     else -> 1f
 }
 
+internal fun glasses64LegacyPitchHz(legacyBand: Int, preset: String): Double {
+    require(legacyBand in 0..5)
+    if (legacyBand <= 2) {
+        return when (legacyBand) {
+            0 -> 4_200.0
+            1 -> 3_500.0
+            else -> 2_800.0
+        }
+    }
+    return when (preset) {
+        "LIGHT" -> when (legacyBand) {
+            3 -> 900.0
+            4 -> 700.0
+            else -> 500.0
+        }
+        "STRONG" -> when (legacyBand) {
+            3 -> 1_200.0
+            4 -> 600.0
+            else -> 250.0
+        }
+        else -> when (legacyBand) {
+            3 -> 1_000.0
+            4 -> 650.0
+            else -> 350.0
+        }
+    }
+}
+
+internal fun glasses64LegacyToneRatio(
+    legacyBand: Int,
+    upperClear: Boolean,
+    lowerClear: Boolean
+): Float {
+    require(legacyBand in 0..5)
+    if (legacyBand <= 2) {
+        return if (upperClear) {
+            when (legacyBand) {
+                0 -> 0.24f
+                1 -> 0.22f
+                else -> 0.20f
+            }
+        } else {
+            when (legacyBand) {
+                0 -> 0.32f
+                1 -> 0.29f
+                else -> 0.26f
+            }
+        }
+    }
+    return if (lowerClear) 0.18f else 0.35f
+}
+
 internal data class Hrtf64CalibrationSettings(
     val swapChannels: Boolean,
     val upperClear: Boolean,
@@ -1136,14 +1188,14 @@ internal class Glasses64AudioEngine(
         val legacyBand = (row * 6 / GLASSES64_ROWS).coerceIn(0, 5)
         val pitchHz = when (settings.verticalSoundMode) {
             Glasses64VerticalSoundMode.LEGACY_SIX_BAND ->
-                pitchHz(legacyBand, settings.pitchPreset)
+                glasses64LegacyPitchHz(legacyBand, settings.pitchPreset)
             Glasses64VerticalSoundMode.LOG_64_ROW,
             Glasses64VerticalSoundMode.LOG_EACH_CELL -> glasses64LogPitchHz(row)
             Glasses64VerticalSoundMode.REGION_ENHANCED -> glasses64EnhancedPitchHz(row)
             Glasses64VerticalSoundMode.REGION_CATEGORICAL -> glasses64CategoricalPitchHz(row)
         }
         val toneRatio = when (settings.verticalSoundMode) {
-            Glasses64VerticalSoundMode.LEGACY_SIX_BAND -> toneRatio(
+            Glasses64VerticalSoundMode.LEGACY_SIX_BAND -> glasses64LegacyToneRatio(
                 legacyBand = legacyBand,
                 upperClear = settings.upperClear,
                 lowerClear = settings.lowerClear
@@ -1174,52 +1226,6 @@ internal class Glasses64AudioEngine(
             }.coerceIn(0f, 1f)
             (noise * noiseRatio + tone * toneRatio) * envelope * 0.32f
         }
-    }
-
-    private fun pitchHz(legacyBand: Int, preset: String): Double {
-        if (legacyBand <= 2) {
-            return when (legacyBand) {
-                0 -> 1350.0
-                1 -> 1200.0
-                else -> 1050.0
-            }
-        }
-        return when (preset) {
-            "LIGHT" -> when (legacyBand) {
-                3 -> 900.0
-                4 -> 700.0
-                else -> 500.0
-            }
-            "STRONG" -> when (legacyBand) {
-                3 -> 1200.0
-                4 -> 600.0
-                else -> 250.0
-            }
-            else -> when (legacyBand) {
-                3 -> 1000.0
-                4 -> 650.0
-                else -> 350.0
-            }
-        }
-    }
-
-    private fun toneRatio(legacyBand: Int, upperClear: Boolean, lowerClear: Boolean): Float {
-        if (legacyBand <= 2) {
-            return if (upperClear) {
-                when (legacyBand) {
-                    0 -> 0.06f
-                    1 -> 0.08f
-                    else -> 0.10f
-                }
-            } else {
-                when (legacyBand) {
-                    0 -> 0.14f
-                    1 -> 0.17f
-                    else -> 0.20f
-                }
-            }
-        }
-        return if (lowerClear) 0.18f else 0.35f
     }
 
     private fun logPitchToneRatio(row: Int): Float {
